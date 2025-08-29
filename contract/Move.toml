@@ -9,10 +9,4 @@ invreg_addr = "_"
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-framework.git", rev = "mainnet", subdir = "aptos-framework" }
 AptosStdlib = { git = "https://github.com/aptos-labs/aptos-framework.git", rev = "mainnet", subdir = "aptos-stdlib" }
-
-
-[dev-dependencies]
-
-
-[dev-addresses]
-invreg_addr = "0x12"
+AptosToken = { git = "https://github.com/aptos-labs/aptos-framework.git", subdir = "aptos-token", rev = "mainnet" }
