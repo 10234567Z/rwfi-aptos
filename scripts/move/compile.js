@@ -14,6 +14,7 @@ async function compile() {
       minter: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
       pauser: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
       denylister: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+      spv_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
     },
   });
 }
