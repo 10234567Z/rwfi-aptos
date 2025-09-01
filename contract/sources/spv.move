@@ -8,22 +8,25 @@ module spv_addr::spv {
     use aptos_framework::table::{Self, Table};
     use aptos_framework::aptos_account;
 
-    struct InvestmentPool {
+    const E_INVALID_ADMIN_SIGNER: u64 = 0;
+
+    struct InvestmentPool has key {
         remaining_tokens: u64,
         funded_tokens: u64,
         admin: address,
     }
 
-    struct Investor has store{
+    struct Investor has store, drop{
         amount_tokens: u64,
     }
 
-    struct InvestorRegistry {
+    struct InvestorRegistry has key {
         investors: Table<address, Investor>,
         investors_count: u64,
     }
 
     fun init_module(admin: &signer) {
+        assert!(signer::address_of(admin) == @admin_addr, E_INVALID_ADMIN_SIGNER);
         let admin_address = signer::address_of(admin);
         let pool = InvestmentPool {
             remaining_tokens: 0,
@@ -35,16 +38,19 @@ module spv_addr::spv {
             investors: table::new(),
             investors_count: 0,
         };
-        // Store the pool in a resource
+        // Store the pool with admin's resources
         move_to(admin, pool);
         move_to(admin, investor_reg);
     }
 
-    public entry fun record_investment(investor: &signer, amount: u64){
+    public entry fun record_investment(investor: &signer, amount: u64) acquires InvestorRegistry {
         // Transfer the equivalent amount of USD/APT to this contract
         let investor_address = signer::address_of(investor);
-        let investors = borrow_global_mut<InvestorRegistry>(@spv_addr);
-        let is_investor_entry = *table::contains(&investors.investors, investor_address);
+        aptos_account::transfer(investor, @spv_addr, amount);
+
+        // Making record entry to the global table
+        let investors = borrow_global_mut<InvestorRegistry>(@admin_addr);
+        let is_investor_entry = table::contains(&investors.investors, investor_address);
         if (is_investor_entry == true) {
             let investor = table::borrow_mut(&mut investors.investors, investor_address);
             investor.amount_tokens += amount;
@@ -56,6 +62,11 @@ module spv_addr::spv {
         }
     }
 
+    public entry fun transfer_corresponding_invtokens(admin: &signer) {
+        assert!(signer::address_of(admin) == @admin_addr, E_INVALID_ADMIN_SIGNER);
+        
+    }
+
     // public entry fun transfer_buyer_payback_to_investor(admin: &signer, amount_in_usd: u64){
     //     // Transfer the equivalent amount of USD to this contract
     //     // Call update inv pool
@@ -65,7 +76,7 @@ module spv_addr::spv {
     //     // Just transfer the received amount to the supplier
     // }
 
-    fun update_inv_pool(admin: &signer, new_remaining: u64, new_funded: u64) {
+    fun update_inv_pool(admin: &signer, new_remaining: u64, new_funded: u64) acquires InvestmentPool {
         let admin_address = signer::address_of(admin);
         let pool = borrow_global_mut<InvestmentPool>(admin_address);
         pool.remaining_tokens = new_remaining;

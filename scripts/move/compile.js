@@ -15,6 +15,7 @@ async function compile() {
       pauser: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
       denylister: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
       spv_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+      admin_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
     },
   });
 }

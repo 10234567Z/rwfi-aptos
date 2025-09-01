@@ -11,11 +11,13 @@ minter = "_"
 pauser = "_"
 denylister = "_"
 spv_addr = "_"
+admin_addr = "_"
 
 [dev-addresses]
 stablecoin = "0xcafe"
 master_minter = "0xbab"
 minter = "0xface"
+admin_addr = "0xdead"
 pauser = "0xdafe"
 denylister = "0xcade"
 
