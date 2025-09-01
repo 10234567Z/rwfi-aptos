@@ -7,6 +7,8 @@ module spv_addr::spv {
     use aptos_framework::event;
     use aptos_framework::table::{Self, Table};
     use aptos_framework::aptos_account;
+    use std::hash;
+    use std::string::{Self, String};
 
     const E_INVALID_ADMIN_SIGNER: u64 = 0;
 
@@ -20,9 +22,16 @@ module spv_addr::spv {
         amount_tokens: u64,
     }
 
+    struct Processing has store, drop, copy {
+        address: address,
+        amount: u64,
+    }
+
     struct InvestorRegistry has key {
         investors: Table<address, Investor>,
+        processing_investors: Table<u64, Processing>,
         investors_count: u64,
+        processing_count: u64,
     }
 
     fun init_module(admin: &signer) {
@@ -36,6 +45,8 @@ module spv_addr::spv {
 
         let investor_reg = InvestorRegistry {
             investors: table::new(),
+            processing_investors: table::new(),
+            processing_count: 0,
             investors_count: 0,
         };
         // Store the pool with admin's resources
@@ -59,12 +70,25 @@ module spv_addr::spv {
                 amount_tokens: amount,
             });
             investors.investors_count += 1;
-        }
+        };
+
+        // Update the processing table for further processing of INV tokens
+        table::upsert(&mut investors.processing_investors, investors.processing_count + 1, Processing {
+            address: investor_address,
+            amount: amount,
+        });
+        investors.processing_count += 1;
     }
 
-    public entry fun transfer_corresponding_invtokens(admin: &signer) {
+    public entry fun transfer_corresponding_invtokens(admin: &signer) acquires InvestorRegistry {
         assert!(signer::address_of(admin) == @admin_addr, E_INVALID_ADMIN_SIGNER);
-        
+        let investor_registery = borrow_global<InvestorRegistry>(@admin_addr);
+        // Fetch each and every investor's data from the chain through iteration
+        let i = 1;
+        while ( i < investor_registery.processing_count){
+            let investor = *table::borrow(&investor_registery.processing_investors, i);
+            invoice_coin::transfer_from(admin, signer::address_of(admin), investor.address, investor.amount);
+        }
     }
 
     // public entry fun transfer_buyer_payback_to_investor(admin: &signer, amount_in_usd: u64){
