@@ -9,6 +9,13 @@ async function test() {
     packageDirectoryPath: "contract",
     namedAddresses: {
       invreg_addr: "0x100",
+      stablecoin: "0x200",
+      master_minter: "0X300",
+      minter: "0x400",
+      pauser: "0x500",
+      denylister: "0x600",
+      spv_addr: "0x700",
+      admin_addr: "0x800",
     },
   });
 }
