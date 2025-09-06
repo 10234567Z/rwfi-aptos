@@ -1,7 +1,7 @@
-module spv_addr::spv {
+module rwfi_addr::spv {
 
     use aptos_std::signer;
-    use stablecoin::invoice_coin;
+    use rwfi_addr::invoice_coin::{Self};
     use aptos_framework::account::{Self, create_signer_with_capability};
     use aptos_framework::table::{Self, Table};
     use aptos_framework::aptos_account;
@@ -54,7 +54,7 @@ module spv_addr::spv {
     }
 
     fun init_module(admin: &signer) {
-        assert!(signer::address_of(admin) == @admin_addr, E_INVALID_ADMIN_SIGNER);
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         let admin_address = signer::address_of(admin);
         let pool = InvestmentPool {
             remaining_tokens: 0,
@@ -83,17 +83,17 @@ module spv_addr::spv {
     public entry fun record_investment(investor: &signer, amount: u64) acquires InvestorRegistry, InvestmentPool {
         // Transfer APT from investor to SPV contract address
         let investor_address = signer::address_of(investor);
-        aptos_account::transfer(investor, @spv_addr, amount);
+        aptos_account::transfer(investor, @rwfi_addr, amount);
 
         // Note: Invoice coins will be minted by admin when calling transfer_corresponding_invtokens
         // This maintains proper access control for minting
 
         // Update investment pool
-        let pool = borrow_global_mut<InvestmentPool>(@admin_addr);
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         pool.remaining_tokens = pool.remaining_tokens + amount;
 
         // Making record entry to the global table
-        let investors = borrow_global_mut<InvestorRegistry>(@admin_addr);
+        let investors = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
         let is_investor_entry = table::contains(&investors.investors, investor_address);
         if (is_investor_entry == true) {
             let investor = table::borrow_mut(&mut investors.investors, investor_address);
@@ -114,8 +114,8 @@ module spv_addr::spv {
     }
 
     public entry fun transfer_corresponding_invtokens(admin: &signer) acquires InvestorRegistry {
-        assert!(signer::address_of(admin) == @admin_addr, E_INVALID_ADMIN_SIGNER);
-        let investor_registry = borrow_global<InvestorRegistry>(@admin_addr);
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
+        let investor_registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         
         // Mint invoice coins to each investor based on their investment
         let i = 1;
@@ -131,16 +131,16 @@ module spv_addr::spv {
 
     public entry fun fund_invoice_when_target_reached(admin: &signer, invoice_id: u64, required_amount: u64, supplier_addr: address) 
         acquires InvestmentPool, ProcessingInvoiceRegistery {
-        assert!(signer::address_of(admin) == @admin_addr, E_INVALID_ADMIN_SIGNER);
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         
         // Get investment pool
-        let pool = borrow_global_mut<InvestmentPool>(@admin_addr);
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         
         // Check if we have enough funds to cover the invoice
         assert!(pool.remaining_tokens >= required_amount, E_INSUFFICIENT_FUNDS);
         
         // Validate that the invoice is in pending state
-        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@admin_addr);
+        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
         let invoice_found = false;
         let i = 1;
         while (i <= processing_registry.invoice_count) {
@@ -155,8 +155,10 @@ module spv_addr::spv {
         };
         assert!(invoice_found, E_INVOICE_NOT_FOUND);
         
-        // Mint invoice coins to fund the supplier
-        // The SPV admin should have minting rights for the invoice coin
+        // Transfer actual APT from SPV contract to supplier
+        aptos_account::transfer(admin, supplier_addr, required_amount);
+        
+        // Also mint invoice coins to represent the funded invoice
         invoice_coin::mint(admin, supplier_addr, required_amount);
         
         // Update pool balances
@@ -165,7 +167,7 @@ module spv_addr::spv {
     }
 
     public entry fun distribute_invoice_payback_to_investors(
-        supplier: &signer, 
+        admin: &signer, 
         invoice_id: u64, 
         total_payback_amount: u64,
         yield_percentage: u64
@@ -177,12 +179,12 @@ module spv_addr::spv {
         assert!(yield_percentage <= 1000, E_INVALID_FUNDING_PERCENTAGE); // Max 1000% return
         
         // Validate that the invoice exists and is funded by this SPV
-        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@admin_addr);
+        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
         let (invoice_found, funded_amount) = validate_invoice_exists(processing_registry, invoice_id, supplier_addr);
         assert!(invoice_found, E_INVOICE_NOT_FOUND);
         
         // Get investment pool to check current state
-        let pool = borrow_global_mut<InvestmentPool>(@admin_addr);
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         assert!(pool.funded_tokens >= funded_amount, E_INSUFFICIENT_FUNDS);
         
         // Calculate total yield amount (payback - principal)
@@ -195,6 +197,86 @@ module spv_addr::spv {
         
         // Distribute returns to investors based on their investment proportions
         distribute_proportional_returns(supplier, principal_amount, yield_amount);
+        
+        // Update pool state - remove the funded tokens since invoice is now paid back
+        pool.funded_tokens = pool.funded_tokens - funded_amount;
+        pool.remaining_tokens = pool.remaining_tokens + total_payback_amount;
+    }
+
+    public entry fun distribute_invoice_payback_to_investors_v2(
+        admin: &signer, 
+        supplier_addr: address,
+        invoice_id: u64, 
+        total_payback_amount: u64,
+        yield_percentage: u64
+    ) acquires InvestorRegistry, InvestmentPool, ProcessingInvoiceRegistery {
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
+        
+        // Validate payback amount is reasonable (must be > 0 and <= 1000% of original)
+        assert!(total_payback_amount > 0, E_INVALID_PAYBACK_AMOUNT);
+        assert!(yield_percentage <= 1000, E_INVALID_FUNDING_PERCENTAGE); // Max 1000% return
+        
+        // Validate that the invoice exists and is funded by this SPV
+        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
+        let (invoice_found, funded_amount) = validate_invoice_exists(processing_registry, invoice_id, supplier_addr);
+        assert!(invoice_found, E_INVOICE_NOT_FOUND);
+        
+        // Get investment pool to check current state
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+        assert!(pool.funded_tokens >= funded_amount, E_INSUFFICIENT_FUNDS);
+        
+        // Calculate total yield amount (payback - principal)
+        let principal_amount = funded_amount;
+        let yield_amount = if (total_payback_amount > principal_amount) {
+            total_payback_amount - principal_amount
+        } else {
+            0
+        };
+        
+        // Distribute returns to investors based on their investment proportions (v2 admin version)
+        distribute_proportional_returns_v2(admin, principal_amount, yield_amount);
+        
+        // Update pool state - remove the funded tokens since invoice is now paid back
+        pool.funded_tokens = pool.funded_tokens - funded_amount;
+        pool.remaining_tokens = pool.remaining_tokens + funded_amount; // Returns to available pool
+    }
+
+    public entry fun distribute_invoice_payback_to_investors_v3(
+        admin: &signer, 
+        supplier: &signer,
+        invoice_id: u64, 
+        total_payback_amount: u64,
+        yield_percentage: u64
+    ) acquires InvestorRegistry, InvestmentPool, ProcessingInvoiceRegistery {
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
+        let supplier_addr = signer::address_of(supplier);
+        
+        // First: Supplier must transfer the payback amount (principal + yield) to the SPV
+        aptos_account::transfer(supplier, @rwfi_addr, total_payback_amount);
+        
+        // Validate payback amount is reasonable (must be > 0 and <= 1000% of original)
+        assert!(total_payback_amount > 0, E_INVALID_PAYBACK_AMOUNT);
+        assert!(yield_percentage <= 1000, E_INVALID_FUNDING_PERCENTAGE); // Max 1000% return
+        
+        // Validate that the invoice exists and is funded by this SPV
+        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
+        let (invoice_found, funded_amount) = validate_invoice_exists(processing_registry, invoice_id, supplier_addr);
+        assert!(invoice_found, E_INVOICE_NOT_FOUND);
+        
+        // Get investment pool to check current state
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+        assert!(pool.funded_tokens >= funded_amount, E_INSUFFICIENT_FUNDS);
+        
+        // Calculate total yield amount (payback - principal)
+        let principal_amount = funded_amount;
+        let yield_amount = if (total_payback_amount > principal_amount) {
+            total_payback_amount - principal_amount
+        } else {
+            0
+        };
+        
+        // Distribute returns to investors based on their investment proportions with real APT transfers
+        distribute_proportional_returns_v2(admin, principal_amount, yield_amount);
         
         // Update pool state - remove the funded tokens since invoice is now paid back
         pool.funded_tokens = pool.funded_tokens - funded_amount;
@@ -223,11 +305,11 @@ module spv_addr::spv {
     
     /// Helper function to distribute returns proportionally to investors
     fun distribute_proportional_returns(
-        supplier: &signer, 
+        admin: &signer, 
         principal_amount: u64, 
         yield_amount: u64
     ) acquires InvestorRegistry {
-        let investor_registry = borrow_global<InvestorRegistry>(@admin_addr);
+        let investor_registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         let total_distributed = 0;
         
         // Calculate total investment for proportion calculation
@@ -247,7 +329,7 @@ module spv_addr::spv {
                 
                 if (total_return > 0) {
                     // Mint invoice coins to investor as their return
-                    invoice_coin::mint(supplier, processing_investor.address, total_return);
+                    invoice_coin::mint(admin, processing_investor.address, total_return);
                     total_distributed = total_distributed + total_return;
                 };
             };
@@ -255,12 +337,49 @@ module spv_addr::spv {
         };
     }
 
-    public entry fun record_invoice_pending(invoice_id: u64, supplier: &signer) acquires ProcessingInvoiceRegistery {
+    /// Helper function to distribute returns proportionally to investors (v2 - admin authorized)
+    fun distribute_proportional_returns_v2(
+        admin: &signer, 
+        principal_amount: u64, 
+        yield_amount: u64
+    ) acquires InvestorRegistry {
+        let investor_registry = borrow_global<InvestorRegistry>(@rwfi_addr);
+        let total_distributed = 0;
+        
+        // Calculate total investment for proportion calculation
+        let total_investment = principal_amount;
+        
+        // Distribute principal + yield proportionally to each investor
+        let j = 1;
+        while (j <= investor_registry.processing_count) {
+            if (table::contains(&investor_registry.processing_investors, j)) {
+                let processing_investor = table::borrow(&investor_registry.processing_investors, j);
+                
+                // Calculate this investor's proportion of the total investment
+                let investor_proportion = processing_investor.amount;
+                let principal_share = investor_proportion; // They get back their principal
+                let yield_share = (investor_proportion * yield_amount) / total_investment; // Proportional yield
+                let total_return = principal_share + yield_share;
+                
+                if (total_return > 0) {
+                    // Transfer actual APT back to investor
+                    aptos_account::transfer(admin, processing_investor.address, total_return);
+                    
+                    // Also mint invoice coins to represent the returns
+                    invoice_coin::mint(admin, processing_investor.address, total_return);
+                    total_distributed = total_distributed + total_return;
+                };
+            };
+            j = j + 1;
+        };
+    }
+
+    public entry fun record_invoice_pending(supplier: &signer, invoice_id: u64) acquires ProcessingInvoiceRegistery {
         // Fetch the invoice from the invoice id and supplier addr and then record it as the pending
         let supplier_addr = signer::address_of(supplier);
         
         // Check if ProcessingInvoiceRegistery exists, if not create it
-        if (!exists<ProcessingInvoiceRegistery>(@admin_addr)) {
+        if (!exists<ProcessingInvoiceRegistery>(@rwfi_addr)) {
             let processing_registry = ProcessingInvoiceRegistery {
                 invoices: table::new(),
                 invoice_count: 0,
@@ -268,7 +387,7 @@ module spv_addr::spv {
             move_to(supplier, processing_registry);
         };
         
-        let processing_registry = borrow_global_mut<ProcessingInvoiceRegistery>(@admin_addr);
+        let processing_registry = borrow_global_mut<ProcessingInvoiceRegistery>(@rwfi_addr);
         
         // Create new processing invoice entry
         let processing_invoice = ProcessingInvoice {
@@ -292,57 +411,57 @@ module spv_addr::spv {
 
     #[view]
     public fun get_investment_pool(): InvestmentPool acquires InvestmentPool {
-        *borrow_global<InvestmentPool>(@admin_addr)
+        *borrow_global<InvestmentPool>(@rwfi_addr)
     }
 
     #[view]
     public fun get_investor_info(investor_addr: address): Investor acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@admin_addr);
+        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         *table::borrow(&registry.investors, investor_addr)
     }
 
     #[view]
     public fun get_processing_info(processing_id: u64): Processing acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@admin_addr);
+        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         *table::borrow(&registry.processing_investors, processing_id)
     }
 
     #[view]
     public fun get_investor_count(): u64 acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@admin_addr);
+        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         registry.investors_count
     }
 
     #[view]
     public fun get_processing_count(): u64 acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@admin_addr);
+        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         registry.processing_count
     }
 
     #[view]
     public fun investor_exists(investor_addr: address): bool acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@admin_addr);
+        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         table::contains(&registry.investors, investor_addr)
     }
 
     #[view]
     public fun get_processing_invoice_count(): u64 acquires ProcessingInvoiceRegistery {
-        if (!exists<ProcessingInvoiceRegistery>(@admin_addr)) {
+        if (!exists<ProcessingInvoiceRegistery>(@rwfi_addr)) {
             return 0
         };
-        let registry = borrow_global<ProcessingInvoiceRegistery>(@admin_addr);
+        let registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
         registry.invoice_count
     }
 
     #[view]
     public fun get_processing_invoice(processing_id: u64): ProcessingInvoice acquires ProcessingInvoiceRegistery {
-        let registry = borrow_global<ProcessingInvoiceRegistery>(@admin_addr);
+        let registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
         *table::borrow(&registry.invoices, processing_id)
     }
 
     // ===== TEST CASES =====
 
-    #[test(admin = @admin_addr, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, aptos_framework = @0x1)]
     /// Test the initialization of the SPV module
     public entry fun test_init_module(admin: signer, aptos_framework: signer) acquires InvestmentPool, InvestorRegistry {
         // Initialize timestamp for testing
@@ -358,7 +477,7 @@ module spv_addr::spv {
         let pool = get_investment_pool();
         assert!(pool.remaining_tokens == 0, 1);
         assert!(pool.funded_tokens == 0, 2);
-        assert!(pool.admin == @admin_addr, 3);
+        assert!(pool.admin == @rwfi_addr, 3);
         
         // Verify InvestorRegistry was created correctly
         assert!(get_investor_count() == 0, 4);
@@ -386,10 +505,10 @@ module spv_addr::spv {
         let investor_address = signer::address_of(investor);
 
         // Update investment pool
-        let pool = borrow_global_mut<InvestmentPool>(@admin_addr);
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         pool.remaining_tokens = pool.remaining_tokens + amount;
 
-        let investors = borrow_global_mut<InvestorRegistry>(@admin_addr);
+        let investors = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
         let is_investor_entry = table::contains(&investors.investors, investor_address);
         if (is_investor_entry == true) {
             let investor = table::borrow_mut(&mut investors.investors, investor_address);
@@ -409,7 +528,7 @@ module spv_addr::spv {
         investors.processing_count += 1;
     }
 
-    #[test(admin = @admin_addr, investor = @0x123, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, investor = @0x123, aptos_framework = @0x1)]
     /// Test recording a single investment (simplified without APT transfer)
     public entry fun test_record_investment_single_simplified(admin: signer, investor: signer, aptos_framework: signer) acquires InvestorRegistry, InvestmentPool {
         // Initialize timestamp for testing
@@ -440,7 +559,7 @@ module spv_addr::spv {
         assert!(get_investor_count() == 1, 6);
     }
 
-    #[test(admin = @admin_addr, investor = @0x123, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, investor = @0x123, aptos_framework = @0x1)]
     /// Test recording multiple investments from the same investor (simplified)
     public entry fun test_record_investment_multiple_same_investor_simplified(admin: signer, investor: signer, aptos_framework: signer) acquires InvestorRegistry, InvestmentPool {
         // Initialize timestamp for testing
@@ -474,7 +593,7 @@ module spv_addr::spv {
         assert!(get_investor_count() == 1, 5);
     }
 
-    #[test(admin = @admin_addr, investor1 = @0x123, investor2 = @0x456, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, investor1 = @0x123, investor2 = @0x456, aptos_framework = @0x1)]
     /// Test recording investments from multiple different investors (simplified)
     public entry fun test_record_investment_multiple_investors_simplified(admin: signer, investor1: signer, investor2: signer, aptos_framework: signer) acquires InvestorRegistry, InvestmentPool {
         // Initialize timestamp for testing
@@ -509,7 +628,7 @@ module spv_addr::spv {
         assert!(get_investor_count() == 2, 6);
     }
 
-    #[test(admin = @admin_addr, investor = @0x123, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, investor = @0x123, aptos_framework = @0x1)]
     /// Test zero amount investment (edge case)
     public entry fun test_record_investment_zero_amount_simplified(admin: signer, investor: signer, aptos_framework: signer) acquires InvestorRegistry, InvestmentPool {
         // Initialize timestamp for testing
@@ -536,7 +655,7 @@ module spv_addr::spv {
         assert!(processing_info.amount == 0, 4);
     }
 
-    #[test(admin = @admin_addr, investor = @0x123, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, investor = @0x123, aptos_framework = @0x1)]
     /// Test large amount investment
     public entry fun test_record_investment_large_amount_simplified(admin: signer, investor: signer, aptos_framework: signer) acquires InvestorRegistry, InvestmentPool {
         // Initialize timestamp for testing
@@ -561,7 +680,7 @@ module spv_addr::spv {
         assert!(processing_info.amount == large_amount, 2);
     }
 
-    #[test(admin = @admin_addr, investor = @0x123, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, investor = @0x123, aptos_framework = @0x1)]
     /// Test complex scenario with multiple investments and different amounts
     public entry fun test_complex_investment_scenario_simplified(admin: signer, investor: signer, aptos_framework: signer) acquires InvestorRegistry, InvestmentPool {
         // Initialize timestamp for testing
@@ -606,7 +725,7 @@ module spv_addr::spv {
         };
     }
 
-    #[test(admin = @admin_addr, investor = @0x123, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, investor = @0x123, aptos_framework = @0x1)]
     /// Test investment data integrity and state consistency
     public entry fun test_investment_data_integrity_simplified(admin: signer, investor: signer, aptos_framework: signer) acquires InvestorRegistry, InvestmentPool {
         // Initialize timestamp for testing
@@ -654,7 +773,7 @@ module spv_addr::spv {
         assert!(get_processing_count() == 2, 10);
     }
 
-    #[test(admin = @admin_addr, supplier = @0x789, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, supplier = @0x789, aptos_framework = @0x1)]
     /// Test recording invoice pending functionality
     public entry fun test_record_invoice_pending(admin: signer, supplier: signer, aptos_framework: signer) acquires ProcessingInvoiceRegistery {
         // Initialize timestamp for testing
@@ -668,7 +787,7 @@ module spv_addr::spv {
         init_module(&admin);
         
         // Record invoice pending
-        record_invoice_pending(12345, &supplier);
+        record_invoice_pending(&supplier, 12345);
         
         // Verify invoice was recorded
         assert!(get_processing_invoice_count() == 1, 1);
@@ -678,7 +797,7 @@ module spv_addr::spv {
         assert!(processing_invoice.supplier_addr == signer::address_of(&supplier), 3);
     }
 
-    #[test(admin = @admin_addr, investor = @0x123, aptos_framework = @0x1)]
+    #[test(admin = @rwfi_addr, investor = @0x123, aptos_framework = @0x1)]
     /// Test investment pool updates correctly
     public entry fun test_investment_pool_updates(admin: signer, investor: signer, aptos_framework: signer) 
         acquires InvestorRegistry, InvestmentPool {
@@ -717,16 +836,16 @@ module spv_addr::spv {
     /// Test-only version of funding that uses APT transfer instead of minting
     fun fund_invoice_when_target_reached_test_version(admin: &signer, invoice_id: u64, required_amount: u64, supplier_addr: address) 
         acquires InvestmentPool, ProcessingInvoiceRegistery {
-        assert!(signer::address_of(admin) == @admin_addr, E_INVALID_ADMIN_SIGNER);
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         
         // Get investment pool
-        let pool = borrow_global_mut<InvestmentPool>(@admin_addr);
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         
         // Check if we have enough funds to cover the invoice
         assert!(pool.remaining_tokens >= required_amount, E_INSUFFICIENT_FUNDS);
         
         // Validate that the invoice is in pending state
-        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@admin_addr);
+        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
         let invoice_found = false;
         let i = 1;
         while (i <= processing_registry.invoice_count) {
@@ -749,7 +868,7 @@ module spv_addr::spv {
         pool.funded_tokens = pool.funded_tokens + required_amount;
     }
 
-    #[test(admin=@admin_addr, investor1=@0x101, investor2=@0x102, supplier=@0x103, aptos_framework=@0x1)]
+    #[test(admin=@rwfi_addr, investor1=@0x101, investor2=@0x102, supplier=@0x103, aptos_framework=@0x1)]
     /// Complete RWA invoice funding integration test
     public entry fun test_complete_rwa_invoice_funding_flow(
         admin: signer, 
@@ -786,7 +905,7 @@ module spv_addr::spv {
         // transfer_corresponding_invtokens(&admin);
         
         // Phase 3: Record invoice pending for funding
-        record_invoice_pending(12345, &supplier);
+        record_invoice_pending(&supplier, 12345);
         assert!(get_processing_invoice_count() == 1, 3);
         
         // Phase 4: Test funding logic without minting (using APT transfer instead)
@@ -805,7 +924,7 @@ module spv_addr::spv {
         assert!(investor2_info.amount_tokens == 4000, 7);
     }
 
-    #[test(admin=@admin_addr, investor1=@0x201, investor2=@0x202, supplier=@0x203, aptos_framework=@0x1)]
+    #[test(admin=@rwfi_addr, investor1=@0x201, investor2=@0x202, supplier=@0x203, aptos_framework=@0x1)]
     /// Complete RWA yield distribution integration test
     public entry fun test_complete_rwa_yield_distribution_cycle(
         admin: signer, 
@@ -834,7 +953,7 @@ module spv_addr::spv {
         // transfer_corresponding_invtokens(&admin);
         
         // Phase 3: Record and fund invoice
-        record_invoice_pending(54321, &supplier);
+        record_invoice_pending(&supplier, 54321);
         fund_invoice_when_target_reached_test_version(&admin, 54321, 10000, signer::address_of(&supplier));
         
         // Verify state after funding
@@ -872,12 +991,12 @@ module spv_addr::spv {
         assert!(yield_percentage <= 1000, E_INVALID_FUNDING_PERCENTAGE);
         
         // Validate invoice exists
-        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@admin_addr);
+        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
         let (invoice_found, funded_amount) = validate_invoice_exists(processing_registry, invoice_id, supplier_addr);
         assert!(invoice_found, E_INVOICE_NOT_FOUND);
         
         // Get investment pool and update state
-        let pool = borrow_global_mut<InvestmentPool>(@admin_addr);
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         assert!(pool.funded_tokens >= funded_amount, E_INSUFFICIENT_FUNDS);
         
         // Update pool state without actual minting

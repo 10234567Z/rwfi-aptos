@@ -13,6 +13,13 @@ async function publish() {
       namedAddresses: {
         // Publish module to new object, but since we create the object on the fly, we fill in the publisher's account address here
         invreg_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        stablecoin: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        master_minter: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        minter: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        pauser: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        denylister: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        spv_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        admin_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
       },
       extraArguments: [`--private-key=${process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_PRIVATE_KEY}`,`--url=${aptosSDK.NetworkToNodeAPI[process.env.NEXT_PUBLIC_APP_NETWORK]}`],
     })

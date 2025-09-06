@@ -2,8 +2,18 @@ require("dotenv").config();
 const fs = require("node:fs");
 
 const modules = [
-  { address: process.env.NEXT_PUBLIC_MODULE_ADDRESS, name: "inv_reg" },
-  { address: "0x1", name: "coin" },
+        //   invreg_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        // stablecoin: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        // master_minter: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        // minter: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        // pauser: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        // denylister: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        // spv_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+        // admin_addr: process.env.NEXT_MODULE_PUBLISHER_ACCOUNT_ADDRESS,
+
+  { address: process.env.NEXT_PUBLIC_MODULE_ADDRESS, name: "invreg_addr" },
+  { address: process.env.NEXT_PUBLIC_MODULE_ADDRESS, name: "stablecoin" },
+  { address: process.env.NEXT_PUBLIC_MODULE_ADDRESS, name: "spv_addr" },
 ];
 
 async function getAbi() {

@@ -41,7 +41,7 @@ import {
   LogOut,
   User,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 
 export function WalletSelector() {
   const { account, connected, disconnect, wallet } = useWallet();
@@ -111,9 +111,50 @@ interface ConnectWalletDialogProps {
 
 function ConnectWalletDialog({ close }: ConnectWalletDialogProps) {
   const { wallets = [], notDetectedWallets = [] } = useWallet();
+  const [detectionAttempts, setDetectionAttempts] = useState(0);
+  
+  // Try to force wallet detection
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (wallets.length === 0 && notDetectedWallets.length === 0 && detectionAttempts < 3) {
+        setDetectionAttempts(prev => prev + 1);
+        console.log(`Wallet detection attempt ${detectionAttempts + 1}`);
+      }
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [wallets.length, notDetectedWallets.length, detectionAttempts]);
+
   const { aptosConnectWallets, availableWallets, installableWallets } = groupAndSortWallets([...wallets, ...notDetectedWallets]);
 
+  // Debug logging to see what wallets are detected
+  console.log("All wallets:", wallets.map(w => w.name));
+  console.log("Not detected wallets:", notDetectedWallets.map(w => w.name));
+  console.log("Available wallets:", availableWallets.map(w => w.name));
+  console.log("Installable wallets:", installableWallets.map(w => w.name));
+  
+  // Check for wallet objects in window
+  useEffect(() => {
+    const checkWallets = () => {
+      console.log("=== Wallet Detection Debug ===");
+      console.log("Window.aptos:", typeof window !== 'undefined' ? (window as any).aptos : 'undefined');
+      console.log("Window.petra:", typeof window !== 'undefined' ? (window as any).petra : 'undefined');
+      console.log("Window.pontem:", typeof window !== 'undefined' ? (window as any).pontem : 'undefined');
+      console.log("Window.martian:", typeof window !== 'undefined' ? (window as any).martian : 'undefined');
+      console.log("Window.fewcha:", typeof window !== 'undefined' ? (window as any).fewcha : 'undefined');
+      console.log("Window.okxwallet:", typeof window !== 'undefined' ? (window as any).okxwallet : 'undefined');
+    };
+    
+    // Check immediately and after a delay
+    checkWallets();
+    const timer = setTimeout(checkWallets, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
   const hasAptosConnectWallets = !!aptosConnectWallets.length;
+  
+  // Show a message if no wallets are detected
+  const noWalletsDetected = wallets.length === 0 && notDetectedWallets.length === 0;
 
   return (
     <DialogContent className="max-h-screen overflow-auto">
@@ -163,26 +204,70 @@ function ConnectWalletDialog({ close }: ConnectWalletDialogProps) {
         )}
 
         <div className="flex flex-col gap-3 pt-3">
-          {availableWallets.map((wallet) => (
-            <WalletRow key={wallet.name} wallet={wallet} onConnect={close} />
-          ))}
-          {!!installableWallets.length && (
-            <Collapsible className="flex flex-col gap-3">
-              <CollapsibleTrigger asChild>
-                <Button size="sm" variant="ghost" className="gap-2">
-                  More wallets <ChevronDown />
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="flex flex-col gap-3">
-                {installableWallets.map((wallet) => (
-                  <WalletRow
-                    key={wallet.name}
-                    wallet={wallet}
-                    onConnect={close}
-                  />
-                ))}
-              </CollapsibleContent>
-            </Collapsible>
+          {noWalletsDetected ? (
+            <div className="text-center py-8 px-4">
+              <div className="mb-4 text-4xl">🔍</div>
+              <h3 className="font-semibold mb-2">No Wallets Detected</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                No Aptos wallet extensions were found in your browser.
+              </p>
+              <div className="space-y-2 text-sm">
+                <p className="font-medium">Install a wallet to continue:</p>
+                <div className="space-y-1">
+                  <a 
+                    href="https://chrome.google.com/webstore/detail/petra-aptos-wallet/ejjladinnckdgjemekebdpeokbikhfci" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="block p-2 rounded border hover:bg-gray-50 transition-colors"
+                  >
+                    🪨 Petra Wallet (Recommended)
+                  </a>
+                  <a 
+                    href="https://chrome.google.com/webstore/detail/pontem-aptos-wallet/phkbamefinggmakgklpkljjmgibohnba" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="block p-2 rounded border hover:bg-gray-50 transition-colors"
+                  >
+                    🟣 Pontem Wallet
+                  </a>
+                  <a 
+                    href="https://chrome.google.com/webstore/detail/martian-aptos-wallet/efbglgofoippbgcjepnhiblaibcnclgk" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="block p-2 rounded border hover:bg-gray-50 transition-colors"
+                  >
+                    👽 Martian Wallet
+                  </a>
+                </div>
+                <p className="text-xs text-muted-foreground mt-4">
+                  After installing, refresh this page and try connecting again.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {availableWallets.map((wallet) => (
+                <WalletRow key={wallet.name} wallet={wallet} onConnect={close} />
+              ))}
+              {!!installableWallets.length && (
+                <Collapsible className="flex flex-col gap-3">
+                  <CollapsibleTrigger asChild>
+                    <Button size="sm" variant="ghost" className="gap-2">
+                      More wallets <ChevronDown />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="flex flex-col gap-3">
+                    {installableWallets.map((wallet) => (
+                      <WalletRow
+                        key={wallet.name}
+                        wallet={wallet}
+                        onConnect={close}
+                      />
+                    ))}
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+            </>
           )}
         </div>
       </AboutAptosConnect>

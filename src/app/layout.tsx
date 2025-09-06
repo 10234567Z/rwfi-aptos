@@ -9,9 +9,9 @@ import { WrongNetworkAlert } from "@/components/WrongNetworkAlert";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  applicationName: "Aptos Boilerplate Template",
-  title: "NextJS Boilerplate Template",
-  description: "Aptos Boilerplate Template",
+  applicationName: "Invendor",
+  title: "Invendor - Invoice Factoring Platform",
+  description: "Decentralized invoice factoring powered by Aptos blockchain. Turn your outstanding invoices into immediate cash flow.",
   manifest: "/manifest.json",
 };
 

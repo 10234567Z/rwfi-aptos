@@ -15,9 +15,10 @@ export function WalletProvider({ children }: PropsWithChildren) {
       autoConnect={true}
       dappConfig={{ network: NETWORK, aptosApiKeys: {[NETWORK]: APTOS_API_KEY} }}
       onError={(error) => {
+        console.error("Wallet error:", error);
         toast({
           variant: "destructive",
-          title: "Error",
+          title: "Wallet Error", 
           description: error || "Unknown wallet error",
         });
       }}

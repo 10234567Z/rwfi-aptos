@@ -1,5 +1,5 @@
 /// Example of a managed stablecoin with mint, burn, freeze and pause functionalities.
-module stablecoin::invoice_coin {
+module rwfi_addr::invoice_coin {
     use aptos_framework::account;
     use aptos_framework::dispatchable_fungible_asset;
     use aptos_framework::event;
@@ -85,7 +85,7 @@ module stablecoin::invoice_coin {
 
     #[view]
     public fun inv_address(): address {
-        object::create_object_address(&@stablecoin, ASSET_SYMBOL)
+        object::create_object_address(&@rwfi_addr, ASSET_SYMBOL)
     }
 
     #[view]
@@ -118,10 +118,10 @@ module stablecoin::invoice_coin {
         // All resources created will be kept in the asset metadata object.
         let metadata_object_signer = &object::generate_signer(constructor_ref);
         move_to(metadata_object_signer, Roles {
-            master_minter: @master_minter,
+            master_minter: @rwfi_addr,
             minters: vector[],
-            pauser: @pauser,
-            denylister: @denylister,
+            pauser: @rwfi_addr,
+            denylister: @rwfi_addr,
         });
 
         // Create mint/burn/transfer refs to allow creator to manage the stablecoin.
@@ -141,12 +141,12 @@ module stablecoin::invoice_coin {
         // checks.
         let deposit = function_info::new_function_info(
             inv_signer,
-            string::utf8(b"inv"),
+            string::utf8(b"invoice_coin"),
             string::utf8(b"deposit"),
         );
         let withdraw = function_info::new_function_info(
             inv_signer,
-            string::utf8(b"inv"),
+            string::utf8(b"invoice_coin"),
             string::utf8(b"withdraw"),
         );
         dispatchable_fungible_asset::register_dispatch_functions(

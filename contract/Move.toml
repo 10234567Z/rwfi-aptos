@@ -4,24 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-invreg_addr = "_"
-stablecoin = "_"
-master_minter = "_"
-minter = "_"
-pauser = "_"
-denylister = "_"
-spv_addr = "_"
-admin_addr = "_"
-
-[dev-addresses]
-invreg_addr = "0xabc"
-spv_addr = "0xdef"
-stablecoin = "0xcafe"
-master_minter = "0xbab"
-minter = "0xface"
-admin_addr = "0xdead"
-pauser = "0xdafe"
-denylister = "0xcade"
+rwfi_addr = "0x2d6d08a9578aee880cdc191ee29c74ca93fed3ace483b6bc5bf456fbe0d76101"
 
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-framework.git", rev = "mainnet", subdir = "aptos-framework" }
