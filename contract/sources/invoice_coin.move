@@ -318,7 +318,8 @@ module rwfi_addr::invoice_coin {
         
         let management = borrow_global<Management>(inv_address());
         let fa = fungible_asset::mint(&management.mint_ref, amount);
-        primary_fungible_store::deposit(to, fa);
+        // Use our custom deposit function with the transfer_ref to work with dispatch system
+        deposit(primary_fungible_store::ensure_primary_store_exists(to, metadata()), fa, &management.transfer_ref);
     }
 
     /// Burn tokens from primary store - used by SPV
