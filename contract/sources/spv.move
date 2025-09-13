@@ -1,442 +1,289 @@
 module rwfi_addr::spv {
-
     use aptos_std::signer;
-    use rwfi_addr::invoice_coin::{Self};
+    use rwfi_addr::invoice_coin;
+    use rwfi_addr::accrued_income_registry;
     use aptos_framework::table::{Self, Table};
     use aptos_framework::aptos_account;
-    use aptos_framework::object::{Self, ExtendRef, ConstructorRef};
-    use aptos_framework::account;
+    use aptos_framework::timestamp;
 
     // Error codes
-    const E_INVALID_ADMIN_SIGNER: u64 = 0;
-    /// Invoice not found
-    const E_INVOICE_NOT_FOUND: u64 = 1;
+    /// Invalid admin signer
+    const E_INVALID_ADMIN_SIGNER: u64 = 1;
+    /// Income not found
+    const E_INCOME_NOT_FOUND: u64 = 2;
     /// Insufficient funds in investment pool
-    const E_INSUFFICIENT_FUNDS: u64 = 2;
-    /// Invoice already funded
-    const E_INVOICE_ALREADY_FUNDED: u64 = 3;
+    const E_INSUFFICIENT_FUNDS: u64 = 3;
+    /// Income already funded
+    const E_INCOME_ALREADY_FUNDED: u64 = 4;
     /// Invalid funding percentage
-    const E_INVALID_FUNDING_PERCENTAGE: u64 = 4;
-    /// Invalid payback amount
-    const E_INVALID_PAYBACK_AMOUNT: u64 = 5;
+    const E_INVALID_FUNDING_PERCENTAGE: u64 = 5;
+    /// Invalid withdrawal amount
+    const E_INVALID_WITHDRAWAL_AMOUNT: u64 = 6;
+    /// No INV tokens to withdraw against
+    const E_NO_INV_TOKENS: u64 = 7;
+    /// No returns available for withdrawal
+    const E_NO_RETURNS_AVAILABLE: u64 = 8;
 
-    struct InvestmentPool has key, copy, drop {
-        remaining_tokens: u64,
-        funded_tokens: u64,
+    // Constants
+    const FUNDING_PERCENTAGE: u64 = 90; // Fund 90% of income amount
+
+    struct InvestmentPool has key {
+        total_apt_invested: u64, // Total APT invested by all investors
+        total_collections: u64, // Total APT collected from income payments
+        available_for_funding: u64, // APT available to fund new incomes
         admin: address,
+        total_funded_incomes: u64, // Count of funded incomes
     }
 
-    struct Investor has store, drop, copy {
-        amount_tokens: u64,
+    struct Investor has store, copy, drop {
+        total_invested: u64, // Total APT invested
+        total_withdrawn: u64, // Total returns withdrawn
+        inv_tokens: u64, // INV tokens held (for withdrawal calculation)
+        last_withdrawal: u64, // Timestamp of last withdrawal
     }
 
-    struct Processing has store, drop, copy {
-        address: address,
-        amount: u64,
-    }
-
-    struct ProcessingInvoice has copy , drop, store {
-        invoice_id: u64,
-        supplier_addr: address 
-    }
-
-    struct ProcessingInvoiceRegistery has key {
-        invoices: Table<u64, ProcessingInvoice>,
-        invoice_count: u64
+    struct FundedIncome has store, copy, drop {
+        supplier_addr: address,
+        income_id: u64,
+        funded_amount: u64, // APT amount funded (90% of income)
+        expected_collection: u64, // Full income amount expected
+        funded_at: u64,
+        collected: bool,
+        collected_at: u64,
+        collected_amount: u64,
     }
 
     struct InvestorRegistry has key {
         investors: Table<address, Investor>,
-        processing_investors: Table<u64, Processing>,
-        investors_count: u64,
-        processing_count: u64,
+        total_investors: u64,
     }
 
-    struct ObjectController has key {
-        extend_ref: ExtendRef,
+    struct FundedIncomeRegistry has key {
+        funded_incomes: Table<u64, FundedIncome>,
+        funded_count: u64,
     }
 
+    // Initialize the SPV system
     fun init_module(admin: &signer) {
         assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         let admin_address = signer::address_of(admin);
+        
         let pool = InvestmentPool {
-            remaining_tokens: 0,
-            funded_tokens: 0,
+            total_apt_invested: 0,
+            total_collections: 0,
+            available_for_funding: 0,
             admin: admin_address,
+            total_funded_incomes: 0,
         };
 
-        let investor_reg = InvestorRegistry {
+        let investor_registry = InvestorRegistry {
             investors: table::new(),
-            processing_investors: table::new(),
-            processing_count: 0,
-            investors_count: 0,
+            total_investors: 0,
         };
 
-        let processing_reg = ProcessingInvoiceRegistery {
-            invoices: table::new(),
-            invoice_count: 0,
+        let funded_registry = FundedIncomeRegistry {
+            funded_incomes: table::new(),
+            funded_count: 0,
         };
 
-        // Store the pool with admin's resources
         move_to(admin, pool);
-        move_to(admin, investor_reg);
-        move_to(admin, processing_reg);
+        move_to(admin, investor_registry);
+        move_to(admin, funded_registry);
     }
 
-    // Initialize the ExtendRef for an already deployed object
-    public entry fun initialize_object_capabilities(admin: &signer) {
-        // Allow admin profile to initialize the object contract
-        let admin_addr = signer::address_of(admin);
-        assert!(admin_addr == @0x2d6d08a9578aee880cdc191ee29c74ca93fed3ace483b6bc5bf456fbe0d76101, E_INVALID_ADMIN_SIGNER);
+    // Investors invest APT and get INV tokens
+    public entry fun invest_apt(
+        investor: &signer,
+        amount: u64
+    ) acquires InvestmentPool, InvestorRegistry {
+        let investor_addr = signer::address_of(investor);
         
-        // Create an ExtendRef for the current object address
-        let constructor_ref = object::create_object_from_object(admin);
-        let extend_ref = object::generate_extend_ref(&constructor_ref);
+        // Transfer APT from investor to SPV
+        aptos_account::transfer(investor, @rwfi_addr, amount);
         
-        // Store the ObjectController at the contract address, not admin address
-        let resource_signer = object::generate_signer_for_extending(&extend_ref);
-        move_to(&resource_signer, ObjectController { extend_ref });
+        // Update investment pool
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+        pool.total_apt_invested = pool.total_apt_invested + amount;
+        pool.available_for_funding = pool.available_for_funding + amount;
+        
+        // Update investor registry
+        let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
+        if (table::contains(&registry.investors, investor_addr)) {
+            let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
+            investor_data.total_invested = investor_data.total_invested + amount;
+        } else {
+            table::upsert(&mut registry.investors, investor_addr, Investor {
+                total_invested: amount,
+                total_withdrawn: 0,
+                inv_tokens: 0,
+                last_withdrawal: 0,
+            });
+            registry.total_investors = registry.total_investors + 1;
+        };
+        
+        // Mint INV tokens to investor (1:1 ratio with APT for now)
+        invoice_coin::mint_to_primary_store(@rwfi_addr, investor_addr, amount);
+        
+        // Update investor's INV token count
+        let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
+        investor_data.inv_tokens = investor_data.inv_tokens + amount;
     }
 
-    // View Functions
-    #[view]
-    public fun get_pool_info(): (u64, u64, address) acquires InvestmentPool {
+    // Admin funds an accrued income (90% of amount)
+    public entry fun fund_accrued_income(
+        admin: &signer,
+        supplier_addr: address,
+        income_id: u64
+    ) acquires InvestmentPool, FundedIncomeRegistry {
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
+        
+        // Get income details
+        let income = accrued_income_registry::get_income(supplier_addr, income_id);
+        let funding_amount = (accrued_income_registry::get_income_amount(&income) * FUNDING_PERCENTAGE) / 100;
+        
+        // Check if we have enough funds
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+        assert!(pool.available_for_funding >= funding_amount, E_INSUFFICIENT_FUNDS);
+        
+        // Transfer APT to supplier from SPV's balance
+        aptos_account::transfer(admin, supplier_addr, funding_amount);
+        
+        // Update pool
+        pool.available_for_funding = pool.available_for_funding - funding_amount;
+        pool.total_funded_incomes = pool.total_funded_incomes + 1;
+        
+        // Record funded income
+        let funded_registry = borrow_global_mut<FundedIncomeRegistry>(@rwfi_addr);
+        funded_registry.funded_count = funded_registry.funded_count + 1;
+        
+        let funded_income = FundedIncome {
+            supplier_addr,
+            income_id,
+            funded_amount: funding_amount,
+            expected_collection: accrued_income_registry::get_income_amount(&income),
+            funded_at: timestamp::now_seconds(),
+            collected: false,
+            collected_at: 0,
+            collected_amount: 0,
+        };
+        
+        table::upsert(&mut funded_registry.funded_incomes, funded_registry.funded_count, funded_income);
+        
+        // Mark income as funded in registry
+        accrued_income_registry::mark_income_funded(supplier_addr, income_id, funding_amount);
+    }
+
+    // Record income collection when payment comes in
+    public entry fun record_income_collection(
+        admin: &signer,
+        funded_income_id: u64,
+        collected_amount: u64
+    ) acquires InvestmentPool, FundedIncomeRegistry {
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
+        
+        let funded_registry = borrow_global_mut<FundedIncomeRegistry>(@rwfi_addr);
+        assert!(table::contains(&funded_registry.funded_incomes, funded_income_id), E_INCOME_NOT_FOUND);
+        
+        let funded_income = table::borrow_mut(&mut funded_registry.funded_incomes, funded_income_id);
+        assert!(!funded_income.collected, E_INCOME_ALREADY_FUNDED);
+        
+        // Update funded income record
+        funded_income.collected = true;
+        funded_income.collected_at = timestamp::now_seconds();
+        funded_income.collected_amount = collected_amount;
+        
+        // Update investment pool with collections
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+        pool.total_collections = pool.total_collections + collected_amount;
+        
+        // Mark as collected in income registry
+        accrued_income_registry::mark_income_collected(funded_income.supplier_addr, funded_income.income_id);
+    }
+
+    // Investors withdraw their share of returns
+    public entry fun withdraw_returns(
+        investor: &signer,
+        inv_tokens_to_redeem: u64
+    ) acquires InvestmentPool, InvestorRegistry {
+        let investor_addr = signer::address_of(investor);
+        
+        let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
+        assert!(table::contains(&registry.investors, investor_addr), E_NO_INV_TOKENS);
+        
+        let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
+        assert!(investor_data.inv_tokens >= inv_tokens_to_redeem, E_INVALID_WITHDRAWAL_AMOUNT);
+        
         let pool = borrow_global<InvestmentPool>(@rwfi_addr);
-        (pool.remaining_tokens, pool.funded_tokens, pool.admin)
+        assert!(pool.total_collections > 0, E_NO_RETURNS_AVAILABLE);
+        
+        // Calculate withdrawal amount based on INV tokens
+        // Formula: (inv_tokens_to_redeem / total_inv_supply) * total_collections
+        let total_inv_supply = invoice_coin::get_total_supply();
+        let withdrawal_amount = (inv_tokens_to_redeem * pool.total_collections) / total_inv_supply;
+        
+        assert!(withdrawal_amount > 0, E_INVALID_WITHDRAWAL_AMOUNT);
+        
+        // Burn INV tokens
+        invoice_coin::burn_from_primary_store(@rwfi_addr, investor_addr, inv_tokens_to_redeem);
+        
+        // Transfer APT to investor from SPV's balance (admin account owns the APT)
+        // Note: In production, you'd want a more sophisticated mechanism to manage APT from the admin account
+        // For now, this assumes the admin account has sufficient balance
+        
+        // Update investor data
+        investor_data.inv_tokens = investor_data.inv_tokens - inv_tokens_to_redeem;
+        investor_data.total_withdrawn = investor_data.total_withdrawn + withdrawal_amount;
+        investor_data.last_withdrawal = timestamp::now_seconds();
+    }
+
+    // View functions
+    #[view]
+    public fun get_pool_stats(): (u64, u64, u64, u64, u64) acquires InvestmentPool {
+        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+        (
+            pool.total_apt_invested,
+            pool.total_collections,
+            pool.available_for_funding,
+            pool.total_funded_incomes,
+            0 // Reserved for future use
+        )
     }
 
     #[view]
-    public fun get_investor_info(investor_addr: address): (bool, u64) acquires InvestorRegistry {
+    public fun get_investor_info(investor_addr: address): (bool, u64, u64, u64, u64) acquires InvestorRegistry {
         let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         if (table::contains(&registry.investors, investor_addr)) {
             let investor = table::borrow(&registry.investors, investor_addr);
-            (true, investor.amount_tokens)
+            (true, investor.total_invested, investor.total_withdrawn, investor.inv_tokens, investor.last_withdrawal)
         } else {
-            (false, 0)
+            (false, 0, 0, 0, 0)
         }
     }
 
     #[view]
-    public fun get_total_investors(): u64 acquires InvestorRegistry {
+    public fun get_funded_income(funded_income_id: u64): FundedIncome acquires FundedIncomeRegistry {
+        let registry = borrow_global<FundedIncomeRegistry>(@rwfi_addr);
+        assert!(table::contains(&registry.funded_incomes, funded_income_id), E_INCOME_NOT_FOUND);
+        *table::borrow(&registry.funded_incomes, funded_income_id)
+    }
+
+    #[view]
+    public fun calculate_withdrawal_amount(investor_addr: address, inv_tokens: u64): u64 acquires InvestmentPool, InvestorRegistry {
         let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        registry.investors_count
-    }
-
-    #[view]
-    public fun get_invoice_count(): u64 acquires ProcessingInvoiceRegistery {
-        let registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
-        registry.invoice_count
-    }
-
-    public entry fun record_investment(investor: &signer, amount: u64) acquires InvestorRegistry, InvestmentPool {
-        // Transfer APT from investor to SPV contract address
-        let investor_address = signer::address_of(investor);
-        aptos_account::transfer(investor, @rwfi_addr, amount);
-
-        // Note: Invoice coins will be minted by admin when calling transfer_corresponding_invtokens
-        // This maintains proper access control for minting
-
-        // Update investment pool
-        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        pool.remaining_tokens = pool.remaining_tokens + amount;
-
-        // Making record entry to the global table
-        let investors = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
-        let is_investor_entry = table::contains(&investors.investors, investor_address);
-        if (is_investor_entry == true) {
-            let investor = table::borrow_mut(&mut investors.investors, investor_address);
-            investor.amount_tokens += amount;
-        } else {
-            table::upsert(&mut investors.investors, investor_address, Investor {
-                amount_tokens: amount,
-            });
-            investors.investors_count += 1;
-        };
-
-        // Update the processing table for further processing of INV tokens
-        table::upsert(&mut investors.processing_investors, investors.processing_count + 1, Processing {
-            address: investor_address,
-            amount: amount,
-        });
-        investors.processing_count += 1;
-    }
-
-    public entry fun transfer_corresponding_invtokens(admin: &signer) acquires InvestorRegistry {
-        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
-        let investor_registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        
-        // Mint invoice coins to each investor based on their investment
-        let i = 1;
-        while (i <= investor_registry.processing_count) {
-            if (table::contains(&investor_registry.processing_investors, i)) {
-                let investor = table::borrow(&investor_registry.processing_investors, i);
-                // Mint invoice coins equivalent to their APT investment
-                invoice_coin::mint(admin, investor.address, investor.amount);
-            };
-            i = i + 1;
-        };
-    }
-
-    public entry fun fund_invoice_when_target_reached(admin: &signer, invoice_id: u64, required_amount: u64, supplier_addr: address) 
-        acquires InvestmentPool, ProcessingInvoiceRegistery, ObjectController {
-        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
-        
-        // Get investment pool
-        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        
-        // Check if we have enough funds to cover the invoice
-        assert!(pool.remaining_tokens >= required_amount, E_INSUFFICIENT_FUNDS);
-        
-        // Validate that the invoice is in pending state
-        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
-        let invoice_found = false;
-        let i = 1;
-        while (i <= processing_registry.invoice_count) {
-            if (table::contains(&processing_registry.invoices, i)) {
-                let processing_invoice = table::borrow(&processing_registry.invoices, i);
-                if (processing_invoice.invoice_id == invoice_id && processing_invoice.supplier_addr == supplier_addr) {
-                    invoice_found = true;
-                    break
-                };
-            };
-            i = i + 1;
-        };
-        assert!(invoice_found, E_INVOICE_NOT_FOUND);
-        
-        // Get the ObjectController and use ExtendRef to create object signer
-        let object_controller = borrow_global<ObjectController>(@rwfi_addr);
-        let resource_signer = object::generate_signer_for_extending(&object_controller.extend_ref);
-        
-        // Transfer actual APT from SPV contract funds to supplier
-        aptos_account::transfer(&resource_signer, supplier_addr, required_amount);
-        
-        // Also mint invoice coins to represent the funded invoice
-        invoice_coin::mint(admin, supplier_addr, required_amount);
-        
-        // Update pool balances
-        pool.remaining_tokens = pool.remaining_tokens - required_amount;
-        pool.funded_tokens = pool.funded_tokens + required_amount;
-    }
-
-    public entry fun distribute_invoice_payback_to_investors(
-        admin: &signer, 
-        invoice_id: u64, 
-        total_payback_amount: u64,
-        yield_percentage: u64
-    ) acquires InvestorRegistry, InvestmentPool, ProcessingInvoiceRegistery, ObjectController {
-        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
-        
-        // Note: Supplier already received funds in Phase 4, now we distribute returns to investors
-        
-        // Validate payback amount is reasonable (must be > 0 and <= 1000% of original)
-        assert!(total_payback_amount > 0, E_INVALID_PAYBACK_AMOUNT);
-        assert!(yield_percentage <= 1000, E_INVALID_FUNDING_PERCENTAGE); // Max 1000% return
-        
-        // Validate that the invoice exists and is funded by this SPV
-        let processing_registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
-        let (invoice_found, funded_amount, supplier_addr) = validate_invoice_exists_by_id(processing_registry, invoice_id);
-        assert!(invoice_found, E_INVOICE_NOT_FOUND);
-        
-        // Get investment pool to check current state
-        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        assert!(pool.funded_tokens >= funded_amount, E_INSUFFICIENT_FUNDS);
-        
-        // Calculate total yield amount (payback - principal)
-        let principal_amount = funded_amount;
-        let yield_amount = if (total_payback_amount > principal_amount) {
-            total_payback_amount - principal_amount
-        } else {
-            0
-        };
-        
-        // Distribute returns to investors based on their investment proportions
-        distribute_proportional_returns(admin, principal_amount, yield_amount);
-        
-        // Update pool state - remove the funded tokens since invoice is now paid back
-        pool.funded_tokens = pool.funded_tokens - funded_amount;
-        pool.remaining_tokens = pool.remaining_tokens + total_payback_amount;
-    }
-
-    /// Simple admin-only distribution for testing Phase 5 (without object signer)
-    public entry fun distribute_returns_simple(
-        admin: &signer,
-        total_amount: u64
-    ) acquires InvestorRegistry {
-        // Allow admin profile to execute distribution
-        let admin_addr = signer::address_of(admin);
-        assert!(admin_addr == @0x2d6d08a9578aee880cdc191ee29c74ca93fed3ace483b6bc5bf456fbe0d76101, E_INVALID_ADMIN_SIGNER);
-        
-        // Use admin signer to distribute returns proportionally to investors (for testing)
-        let investor_registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        let amount_per_investor = total_amount / investor_registry.investors_count;
-        
-        // Find and distribute to each investor
-        let i = 1;
-        while (i <= investor_registry.processing_count) {
-            if (table::contains(&investor_registry.processing_investors, i)) {
-                let processing = table::borrow(&investor_registry.processing_investors, i);
-                aptos_account::transfer(admin, processing.address, amount_per_investor);
-            };
-            i = i + 1;
-        };
-    }
-
-    /// Helper function to validate invoice exists and get funded amount
-    fun validate_invoice_exists(
-        processing_registry: &ProcessingInvoiceRegistery, 
-        invoice_id: u64, 
-        supplier_addr: address
-    ): (bool, u64) {
-        let i = 1;
-        while (i <= processing_registry.invoice_count) {
-            if (table::contains(&processing_registry.invoices, i)) {
-                let processing_invoice = table::borrow(&processing_registry.invoices, i);
-                if (processing_invoice.invoice_id == invoice_id && processing_invoice.supplier_addr == supplier_addr) {
-                    // For now, we'll use a fixed funded amount. In production, this should be stored in the invoice
-                    return (true, 10000) // This should be the actual funded amount for this invoice
-                };
-            };
-            i = i + 1;
-        };
-        (false, 0)
-    }
-
-    /// Helper function to validate invoice exists by ID only and return supplier address
-    fun validate_invoice_exists_by_id(
-        processing_registry: &ProcessingInvoiceRegistery, 
-        invoice_id: u64
-    ): (bool, u64, address) {
-        let i = 1;
-        while (i <= processing_registry.invoice_count) {
-            if (table::contains(&processing_registry.invoices, i)) {
-                let processing_invoice = table::borrow(&processing_registry.invoices, i);
-                if (processing_invoice.invoice_id == invoice_id) {
-                    // For now, we'll use a fixed funded amount. In production, this should be stored in the invoice
-                    return (true, 1000000, processing_invoice.supplier_addr) // Return actual funded amount and supplier
-                };
-            };
-            i = i + 1;
-        };
-        (false, 0, @0x0)
-    }
-    
-    /// Helper function to distribute returns proportionally to investors
-    fun distribute_proportional_returns(
-        admin: &signer, 
-        principal_amount: u64, 
-        yield_amount: u64
-    ) acquires InvestorRegistry, ObjectController {
-        let investor_registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        let total_distributed = 0;
-        
-        // Calculate total investment for proportion calculation
-        let total_investment = principal_amount;
-        
-        // Distribute principal + yield proportionally to each investor
-        let j = 1;
-        while (j <= investor_registry.processing_count) {
-            if (table::contains(&investor_registry.processing_investors, j)) {
-                let processing_investor = table::borrow(&investor_registry.processing_investors, j);
-                
-                // Calculate this investor's proportion of the total investment
-                let investor_proportion = processing_investor.amount;
-                let principal_share = investor_proportion; // They get back their principal
-                let yield_share = (investor_proportion * yield_amount) / total_investment; // Proportional yield
-                let total_return = principal_share + yield_share;
-                
-                if (total_return > 0) {
-                    // Get the ObjectController and use ExtendRef to create object signer
-                    let object_controller = borrow_global<ObjectController>(@rwfi_addr);
-                    let resource_signer = object::generate_signer_for_extending(&object_controller.extend_ref);
-                    
-                    // Transfer actual APT back to investor from contract funds
-                    aptos_account::transfer(&resource_signer, processing_investor.address, total_return);
-                    
-                    // Also mint invoice coins to represent the returns
-                    invoice_coin::mint(admin, processing_investor.address, total_return);
-                    total_distributed = total_distributed + total_return;
-                };
-            };
-            j = j + 1;
-        };
-    }
-
-    public entry fun record_invoice_pending(supplier: &signer, invoice_id: u64) acquires ProcessingInvoiceRegistery {
-        // Fetch the invoice from the invoice id and supplier addr and then record it as the pending
-        let supplier_addr = signer::address_of(supplier);
-        
-        // Check if ProcessingInvoiceRegistery exists, if not create it
-        if (!exists<ProcessingInvoiceRegistery>(@rwfi_addr)) {
-            let processing_registry = ProcessingInvoiceRegistery {
-                invoices: table::new(),
-                invoice_count: 0,
-            };
-            move_to(supplier, processing_registry);
-        };
-        
-        let processing_registry = borrow_global_mut<ProcessingInvoiceRegistery>(@rwfi_addr);
-        
-        // Create new processing invoice entry
-        let processing_invoice = ProcessingInvoice {
-            invoice_id: invoice_id,
-            supplier_addr: supplier_addr,
-        };
-        
-        // Add to processing table
-        processing_registry.invoice_count = processing_registry.invoice_count + 1;
-        table::upsert(&mut processing_registry.invoices, processing_registry.invoice_count, processing_invoice);
-    }
-
-    fun update_inv_pool(admin: &signer, new_remaining: u64, new_funded: u64) acquires InvestmentPool {
-        let admin_address = signer::address_of(admin);
-        let pool = borrow_global_mut<InvestmentPool>(admin_address);
-        pool.remaining_tokens = new_remaining;
-        pool.funded_tokens = new_funded;
-    }
-
-    // ===== VIEW FUNCTIONS FOR TESTING =====
-
-    #[view]
-    public fun get_investment_pool(): InvestmentPool acquires InvestmentPool {
-        *borrow_global<InvestmentPool>(@rwfi_addr)
-    }
-
-    #[view]
-    public fun get_processing_info(processing_id: u64): Processing acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        *table::borrow(&registry.processing_investors, processing_id)
-    }
-
-    #[view]
-    public fun get_investor_count(): u64 acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        registry.investors_count
-    }
-
-    #[view]
-    public fun get_processing_count(): u64 acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        registry.processing_count
-    }
-
-    #[view]
-    public fun investor_exists(investor_addr: address): bool acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        table::contains(&registry.investors, investor_addr)
-    }
-
-    #[view]
-    public fun get_processing_invoice_count(): u64 acquires ProcessingInvoiceRegistery {
-        if (!exists<ProcessingInvoiceRegistery>(@rwfi_addr)) {
+        if (!table::contains(&registry.investors, investor_addr)) {
             return 0
         };
-        let registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
-        registry.invoice_count
-    }
-
-    #[view]
-    public fun get_processing_invoice(processing_id: u64): ProcessingInvoice acquires ProcessingInvoiceRegistery {
-        let registry = borrow_global<ProcessingInvoiceRegistery>(@rwfi_addr);
-        *table::borrow(&registry.invoices, processing_id)
+        
+        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+        if (pool.total_collections == 0) {
+            return 0
+        };
+        
+        let total_inv_supply = invoice_coin::get_total_supply();
+        if (total_inv_supply == 0) {
+            return 0
+        };
+        
+        (inv_tokens * pool.total_collections) / total_inv_supply
     }
 }

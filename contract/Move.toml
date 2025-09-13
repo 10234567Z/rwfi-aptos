@@ -4,10 +4,10 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-rwfi_addr = "0x477bc7d5a9cad085f7eea321099f471dc07e33ad8b434b6c8702840df9b36f6d"
+rwfi_addr = "0x71383a56eb24011c2c1e086128306036cbb83e98d780ed2ee596def61c15e6cd"
 
 [dev-addresses]
-rwfi_addr = "0x477bc7d5a9cad085f7eea321099f471dc07e33ad8b434b6c8702840df9b36f6d"
+rwfi_addr = "0x71383a56eb24011c2c1e086128306036cbb83e98d780ed2ee596def61c15e6cd"
 
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-framework.git", rev = "mainnet", subdir = "aptos-framework" }

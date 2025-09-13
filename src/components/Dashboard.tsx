@@ -148,34 +148,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           </CardContent>
         </Card>
       </div>
-
-      <div className="mt-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Stats</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">-</div>
-                <div className="text-sm text-gray-500">My Invoices</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">-</div>
-                <div className="text-sm text-gray-500">Total Funded</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-600">-</div>
-                <div className="text-sm text-gray-500">Pool Balance</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-orange-600">-</div>
-                <div className="text-sm text-gray-500">My Investment</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
     </div>
   );
 }

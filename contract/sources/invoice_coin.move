@@ -1,6 +1,5 @@
 /// Example of a managed stablecoin with mint, burn, freeze and pause functionalities.
 module rwfi_addr::invoice_coin {
-    use aptos_framework::account;
     use aptos_framework::dispatchable_fungible_asset;
     use aptos_framework::event;
     use aptos_framework::function_info;
@@ -11,7 +10,6 @@ module rwfi_addr::invoice_coin {
     use std::signer;
     use std::string::{Self, utf8};
     use std::vector;
-    use aptos_framework::chain_id;
 
     /// Caller is not authorized to make this call
     const EUNAUTHORIZED: u64 = 1;
@@ -85,6 +83,8 @@ module rwfi_addr::invoice_coin {
 
     #[view]
     public fun inv_address(): address {
+        // Return the address where the INV fungible asset object was created
+        // This matches what create_named_object creates in init_module
         object::create_object_address(&@rwfi_addr, ASSET_SYMBOL)
     }
 
@@ -118,10 +118,10 @@ module rwfi_addr::invoice_coin {
         // All resources created will be kept in the asset metadata object.
         let metadata_object_signer = &object::generate_signer(constructor_ref);
         move_to(metadata_object_signer, Roles {
-            master_minter: @rwfi_addr,
+            master_minter: signer::address_of(inv_signer),
             minters: vector[],
-            pauser: @rwfi_addr,
-            denylister: @rwfi_addr,
+            pauser: signer::address_of(inv_signer),
+            denylister: signer::address_of(inv_signer),
         });
 
         // Create mint/burn/transfer refs to allow creator to manage the stablecoin.
@@ -299,6 +299,57 @@ module rwfi_addr::invoice_coin {
         assert!(signer::address_of(admin) == roles.master_minter, EUNAUTHORIZED);
         assert!(!vector::contains(&roles.minters, &minter), EALREADY_MINTER);
         vector::push_back(&mut roles.minters, minter);
+    }
+
+    /// Transfer master minter role - used for admin takeover
+    public entry fun transfer_master_minter(current_master: &signer, new_master: address) acquires Roles, State {
+        assert_not_paused();
+        let roles = borrow_global_mut<Roles>(inv_address());
+        assert!(signer::address_of(current_master) == roles.master_minter, EUNAUTHORIZED);
+        roles.master_minter = new_master;
+    }
+
+    /// Mint tokens to primary store - used by SPV
+    public fun mint_to_primary_store(minter: address, to: address, amount: u64) acquires Roles, Management, State {
+        assert_not_paused();
+        let roles = borrow_global<Roles>(inv_address());
+        assert!(minter == roles.master_minter || vector::contains(&roles.minters, &minter), EUNAUTHORIZED);
+        assert_not_denylisted(to);
+        
+        let management = borrow_global<Management>(inv_address());
+        let fa = fungible_asset::mint(&management.mint_ref, amount);
+        primary_fungible_store::deposit(to, fa);
+    }
+
+    /// Burn tokens from primary store - used by SPV
+    public fun burn_from_primary_store(minter: address, from: address, amount: u64) acquires Roles, Management, State {
+        assert_not_paused();
+        let roles = borrow_global<Roles>(inv_address());
+        assert!(minter == roles.master_minter || vector::contains(&roles.minters, &minter), EUNAUTHORIZED);
+        assert_not_denylisted(from);
+        
+        let management = borrow_global<Management>(inv_address());
+        let store = primary_fungible_store::primary_store(from, metadata());
+        let fa = fungible_asset::withdraw_with_ref(&management.transfer_ref, store, amount);
+        fungible_asset::burn(&management.burn_ref, fa);
+    }
+
+    /// Get total supply of INV tokens
+    #[view]
+    public fun get_total_supply(): u64 {
+        let metadata = metadata();
+        (option::extract(&mut fungible_asset::supply(metadata)) as u64)
+    }
+
+    #[view]
+    public fun get_balance(account_addr: address): u64 {
+        primary_fungible_store::balance(account_addr, metadata())
+    }
+
+    #[view]
+    public fun get_master_minter(): address acquires Roles {
+        let roles = borrow_global<Roles>(inv_address());
+        roles.master_minter
     }
 
     fun assert_is_minter(minter: &signer) acquires Roles {

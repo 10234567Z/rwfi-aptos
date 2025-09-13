@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { aptos } from "@/lib/aptos";
 import type { InputTransactionData } from "@aptos-labs/wallet-adapter-react";
 import { RWFI_ADDRESS } from "@/constants";
+import { InputViewFunctionData } from "@aptos-labs/ts-sdk";
 
 interface PoolData {
   remaining_tokens: number;
@@ -19,6 +20,10 @@ interface PoolData {
 
 interface InvestorData {
   amount_tokens: number;
+}
+
+const ViewInvestmentPool: InputViewFunctionData = {
+  function: `${RWFI_ADDRESS}::spv::get_investment_pool`,
 }
 
 export function InvestmentPool() {
@@ -32,13 +37,11 @@ export function InvestmentPool() {
   const loadPoolData = async () => {
     setIsLoading(true);
     try {
-      // Try to get pool data
+      console.log(aptos);
       const poolResult = await aptos.view({
-        payload: {
-          function: `${RWFI_ADDRESS}::spv::get_investment_pool`,
-          functionArguments: [],
-        },
+        payload: ViewInvestmentPool,
       });
+      console.log("Pool Data:", poolResult);
       setPoolData(poolResult[0] as PoolData);
 
       // Try to get investor data if connected

@@ -7,8 +7,8 @@ import { WalletProvider } from "@/components/WalletProvider";
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  applicationName: "RWA-Fi",
-  title: "RWA-Fi - Real World Asset Investment Platform",
+  applicationName: "Invendor",
+  title: "Invendor - Real World Asset Investment Platform",
   description: "Decentralized invoice factoring and investment platform powered by Aptos blockchain.",
   manifest: "/manifest.json",
 };
