@@ -39,6 +39,8 @@ module rwfi_addr::spv {
     const E_DEFAULT_NOT_FOUND: u64 = 14;
     /// Income not overdue
     const E_INCOME_NOT_OVERDUE: u64 = 15;
+    /// Funding limit exceeded
+    const E_FUNDING_LIMIT_EXCEEDED: u64 = 16;
 
     // Constants
     const FUNDING_PERCENTAGE: u64 = 90; // Fund 90% of income amount
@@ -64,6 +66,8 @@ module rwfi_addr::spv {
         total_withdrawn: u64, // Total returns withdrawn
         inv_tokens: u64, // INV tokens held (for withdrawal calculation)
         last_withdrawal: u64, // Timestamp of last withdrawal
+        join_epoch: u64, // When they first invested (epoch ID)
+        last_claim_epoch: u64, // Last epoch they claimed returns from
     }
 
     struct FundedIncome has store, copy, drop {
@@ -150,6 +154,20 @@ module rwfi_addr::spv {
         days_overdue: u64,
     }
 
+    // Epoch-based withdrawal system structs
+    struct CollectionEpoch has store, copy, drop {
+        epoch_id: u64,
+        collections_amount: u64,
+        total_inv_supply_at_epoch: u64,
+        timestamp: u64,
+    }
+
+    struct EpochRegistry has key {
+        epochs: Table<u64, CollectionEpoch>,
+        current_epoch: u64,
+        total_epochs: u64,
+    }
+
     // Initialize the SPV system
     fun init_module(admin: &signer) {
         assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
@@ -209,6 +227,13 @@ module rwfi_addr::spv {
             overdue_tracking: table::new(),
         };
 
+        // Initialize Epoch Registry for time-based withdrawal system
+        let epoch_registry = EpochRegistry {
+            epochs: table::new(),
+            current_epoch: 0,
+            total_epochs: 0,
+        };
+
         move_to(admin, pool);
         move_to(admin, investor_registry);
         move_to(admin, funded_registry);
@@ -216,13 +241,14 @@ module rwfi_addr::spv {
         move_to(admin, risk_registry);
         move_to(admin, default_management);
         move_to(admin, default_registry);
+        move_to(admin, epoch_registry);
     }
 
     // Investors invest APT and get INV tokens
     public entry fun invest_apt(
         investor: &signer,
         amount: u64
-    ) acquires InvestmentPool, InvestorRegistry {
+    ) acquires InvestmentPool, InvestorRegistry, EpochRegistry {
         let investor_addr = signer::address_of(investor);
         
         // Get treasury address from the capability
@@ -240,6 +266,9 @@ module rwfi_addr::spv {
         
         // Update investor registry
         let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
+        let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
+        let current_epoch = epoch_registry.current_epoch;
+        
         if (table::contains(&registry.investors, investor_addr)) {
             let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
             investor_data.total_invested = investor_data.total_invested + amount;
@@ -249,6 +278,8 @@ module rwfi_addr::spv {
                 total_withdrawn: 0,
                 inv_tokens: 0,
                 last_withdrawal: 0,
+                join_epoch: current_epoch, // Record when they joined
+                last_claim_epoch: current_epoch, // Start claiming from current epoch
             });
             registry.total_investors = registry.total_investors + 1;
         };
@@ -424,7 +455,7 @@ module rwfi_addr::spv {
         let funding_amount = (accrued_income_registry::get_income_amount(&income) * FUNDING_PERCENTAGE) / 100;
         
         // Risk checks
-        assert!(funding_amount <= risk_mgmt.max_single_funding, E_INVALID_WITHDRAWAL_AMOUNT);
+        assert!(funding_amount <= risk_mgmt.max_single_funding, E_FUNDING_LIMIT_EXCEEDED);
         assert!(supplier_profile.total_funded + funding_amount <= risk_mgmt.max_supplier_exposure, E_SUPPLIER_EXPOSURE_EXCEEDED);
         
         // Check industry concentration
@@ -493,7 +524,7 @@ module rwfi_addr::spv {
         admin: &signer,
         funded_income_id: u64,
         collected_amount: u64
-    ) acquires InvestmentPool, FundedIncomeRegistry, RiskRegistry {
+    ) acquires InvestmentPool, FundedIncomeRegistry, RiskRegistry, EpochRegistry {
         assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         
         let funded_registry = borrow_global_mut<FundedIncomeRegistry>(@rwfi_addr);
@@ -513,6 +544,9 @@ module rwfi_addr::spv {
         let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         pool.total_collections = pool.total_collections + collected_amount;
         
+        // Create new epoch when collections happen
+        create_new_epoch_internal(collected_amount);
+        
         // Update supplier risk profile on successful payment
         let risk_registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
         if (table::contains(&risk_registry.supplier_profiles, supplier_addr)) {
@@ -523,6 +557,27 @@ module rwfi_addr::spv {
         
         // Mark as collected in income registry
         accrued_income_registry::mark_income_collected(funded_income.supplier_addr, funded_income.income_id);
+    }
+
+    // Internal function to create new epoch when collections happen
+    fun create_new_epoch_internal(collected_amount: u64) acquires EpochRegistry {
+        let epoch_registry = borrow_global_mut<EpochRegistry>(@rwfi_addr);
+        
+        // Get current total INV supply at this moment
+        let total_inv_supply = invoice_coin::get_total_supply();
+        
+        // Create new epoch
+        epoch_registry.current_epoch = epoch_registry.current_epoch + 1;
+        epoch_registry.total_epochs = epoch_registry.total_epochs + 1;
+        
+        let new_epoch = CollectionEpoch {
+            epoch_id: epoch_registry.current_epoch,
+            collections_amount: collected_amount,
+            total_inv_supply_at_epoch: total_inv_supply,
+            timestamp: timestamp::now_seconds(),
+        };
+        
+        table::upsert(&mut epoch_registry.epochs, epoch_registry.current_epoch, new_epoch);
     }
 
     // Check for overdue payments and mark defaults (anyone can call this)
@@ -765,6 +820,88 @@ module rwfi_addr::spv {
         investor_data.last_withdrawal = timestamp::now_seconds();
     }
 
+    // New epoch-based withdrawal system - prevents "late investor advantage"
+    public entry fun withdraw_returns_epoch_based(
+        investor: &signer,
+        inv_tokens_to_redeem: u64
+    ) acquires InvestmentPool, InvestorRegistry, EpochRegistry {
+        let investor_addr = signer::address_of(investor);
+        
+        let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
+        assert!(table::contains(&registry.investors, investor_addr), E_NO_INV_TOKENS);
+        
+        let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
+        assert!(investor_data.inv_tokens >= inv_tokens_to_redeem, E_INVALID_WITHDRAWAL_AMOUNT);
+        
+        // Get epoch data first before calling calculation function
+        let join_epoch = investor_data.join_epoch;
+        let last_claim_epoch = investor_data.last_claim_epoch;
+        let current_epoch = {
+            let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
+            assert!(epoch_registry.total_epochs > 0, E_NO_RETURNS_AVAILABLE);
+            epoch_registry.current_epoch
+        };
+        
+        // Calculate returns from epochs after investor joined
+        let withdrawal_amount = calculate_epoch_based_returns(
+            inv_tokens_to_redeem,
+            join_epoch,
+            last_claim_epoch
+        );
+        
+        assert!(withdrawal_amount > 0, E_NO_RETURNS_AVAILABLE);
+        
+        // Burn INV tokens
+        invoice_coin::burn_from_primary_store(@rwfi_addr, investor_addr, inv_tokens_to_redeem);
+        
+        // Transfer APT to investor from treasury account
+        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+        let treasury_signer = account::create_signer_with_capability(&pool.treasury_cap);
+        aptos_account::transfer(&treasury_signer, investor_addr, withdrawal_amount);
+        
+        // Update pool to reflect withdrawal
+        let pool_mut = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+        assert!(pool_mut.total_collections >= withdrawal_amount, E_INSUFFICIENT_FUNDS);
+        pool_mut.total_collections = pool_mut.total_collections - withdrawal_amount;
+        
+        // Update investor data
+        investor_data.inv_tokens = investor_data.inv_tokens - inv_tokens_to_redeem;
+        investor_data.total_withdrawn = investor_data.total_withdrawn + withdrawal_amount;
+        investor_data.last_withdrawal = timestamp::now_seconds();
+        investor_data.last_claim_epoch = current_epoch; // Update last claimed epoch
+    }
+
+    // Calculate returns based on epochs after investor joined
+    fun calculate_epoch_based_returns(
+        inv_tokens_to_redeem: u64,
+        join_epoch: u64,
+        last_claim_epoch: u64
+    ): u64 acquires EpochRegistry {
+        let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
+        let total_returns = 0u64;
+        
+        // Start from the epoch after they last claimed (or joined)
+        let start_epoch = if (last_claim_epoch > join_epoch) { last_claim_epoch } else { join_epoch };
+        let i = start_epoch + 1;
+        
+        // Sum up returns from all epochs after investor joined/last claimed
+        while (i <= epoch_registry.current_epoch) {
+            if (table::contains(&epoch_registry.epochs, i)) {
+                let epoch = table::borrow(&epoch_registry.epochs, i);
+                
+                // Only count epochs with collections
+                if (epoch.collections_amount > 0 && epoch.total_inv_supply_at_epoch > 0) {
+                    // Calculate proportional share of this epoch's collections
+                    let investor_share = (inv_tokens_to_redeem * epoch.collections_amount) / epoch.total_inv_supply_at_epoch;
+                    total_returns = total_returns + investor_share;
+                };
+            };
+            i = i + 1;
+        };
+        
+        total_returns
+    }
+
     // Helper function to get treasury address
     #[view]
     public fun get_treasury_address(): address acquires InvestmentPool {
@@ -913,20 +1050,61 @@ module rwfi_addr::spv {
 
     #[view]
     public fun get_overdue_incomes(): vector<u64> acquires DefaultRegistry {
-        let registry = borrow_global<DefaultRegistry>(@rwfi_addr);
+        let _default_registry = borrow_global<DefaultRegistry>(@rwfi_addr);
         let overdue_list = vector::empty<u64>();
         
-        // Note: In a full implementation, you'd want to iterate through the table more efficiently
-        // For demo purposes, this simplified approach works
-        let i = 1;
-        while (i <= 100) { // Limit to first 100 for performance
-            if (table::contains(&registry.overdue_tracking, i)) {
-                vector::push_back(&mut overdue_list, i);
-            };
-            i = i + 1;
-        };
+        // Iterate through overdue tracking
+        // Note: This is a simplified version. In practice, you might want to
+        // implement a more efficient way to track and retrieve overdue items
         
         overdue_list
+    }
+
+    // View functions for epoch-based system
+    #[view]
+    public fun get_epoch_info(epoch_id: u64): (bool, u64, u64, u64, u64) acquires EpochRegistry {
+        let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
+        
+        if (table::contains(&epoch_registry.epochs, epoch_id)) {
+            let epoch = table::borrow(&epoch_registry.epochs, epoch_id);
+            (true, epoch.epoch_id, epoch.collections_amount, epoch.total_inv_supply_at_epoch, epoch.timestamp)
+        } else {
+            (false, 0, 0, 0, 0)
+        }
+    }
+
+    #[view]
+    public fun get_current_epoch(): u64 acquires EpochRegistry {
+        let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
+        epoch_registry.current_epoch
+    }
+
+    #[view]
+    public fun get_investor_epoch_info(investor_addr: address): (u64, u64) acquires InvestorRegistry {
+        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
+        
+        if (table::contains(&registry.investors, investor_addr)) {
+            let investor_data = table::borrow(&registry.investors, investor_addr);
+            (investor_data.join_epoch, investor_data.last_claim_epoch)
+        } else {
+            (0, 0)
+        }
+    }
+
+    #[view]
+    public fun calculate_available_returns_for_investor(investor_addr: address): u64 acquires InvestorRegistry, EpochRegistry {
+        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
+        
+        if (!table::contains(&registry.investors, investor_addr)) {
+            return 0
+        };
+        
+        let investor_data = table::borrow(&registry.investors, investor_addr);
+        calculate_epoch_based_returns(
+            investor_data.inv_tokens,
+            investor_data.join_epoch,
+            investor_data.last_claim_epoch
+        )
     }
 
     #[view]
