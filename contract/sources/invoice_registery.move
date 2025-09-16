@@ -222,4 +222,12 @@ module rwfi_addr::accrued_income_registry {
     public fun get_income_status(income: &AccruedIncome): u64 {
         income.status
     }
+
+    public fun get_income_type(income: &AccruedIncome): u64 {
+        income.income_type
+    }
+
+    public fun get_income_due_date(income: &AccruedIncome): u64 {
+        income.due_date
+    }
 }
