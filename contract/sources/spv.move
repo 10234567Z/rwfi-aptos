@@ -5,6 +5,8 @@ module rwfi_addr::spv {
     use aptos_framework::table::{Self, Table};
     use aptos_framework::aptos_account;
     use aptos_framework::timestamp;
+    use aptos_framework::account;
+    use aptos_framework::resource_account;
 
     // Error codes
     /// Invalid admin signer
@@ -23,6 +25,8 @@ module rwfi_addr::spv {
     const E_NO_INV_TOKENS: u64 = 7;
     /// No returns available for withdrawal
     const E_NO_RETURNS_AVAILABLE: u64 = 8;
+    /// Resource account not initialized
+    const E_RESOURCE_ACCOUNT_NOT_INITIALIZED: u64 = 9;
 
     // Constants
     const FUNDING_PERCENTAGE: u64 = 90; // Fund 90% of income amount
@@ -33,6 +37,7 @@ module rwfi_addr::spv {
         available_for_funding: u64, // APT available to fund new incomes
         admin: address,
         total_funded_incomes: u64, // Count of funded incomes
+        treasury_cap: account::SignerCapability, // Capability to sign for the treasury account
     }
 
     struct Investor has store, copy, drop {
@@ -68,12 +73,16 @@ module rwfi_addr::spv {
         assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         let admin_address = signer::address_of(admin);
         
+        // Create resource account for treasury operations
+        let (treasury_signer, treasury_cap) = account::create_resource_account(admin, b"SPV_TREASURY");
+        
         let pool = InvestmentPool {
             total_apt_invested: 0,
             total_collections: 0,
             available_for_funding: 0,
             admin: admin_address,
             total_funded_incomes: 0,
+            treasury_cap,
         };
 
         let investor_registry = InvestorRegistry {
@@ -98,13 +107,18 @@ module rwfi_addr::spv {
     ) acquires InvestmentPool, InvestorRegistry {
         let investor_addr = signer::address_of(investor);
         
-        // Transfer APT from investor to SPV
-        aptos_account::transfer(investor, @rwfi_addr, amount);
+        // Get treasury address from the capability
+        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+        let treasury_signer = account::create_signer_with_capability(&pool.treasury_cap);
+        let treasury_addr = signer::address_of(&treasury_signer);
+        
+        // Transfer APT from investor to treasury account
+        aptos_account::transfer(investor, treasury_addr, amount);
         
         // Update investment pool
-        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        pool.total_apt_invested = pool.total_apt_invested + amount;
-        pool.available_for_funding = pool.available_for_funding + amount;
+        let pool_mut = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+        pool_mut.total_apt_invested = pool_mut.total_apt_invested + amount;
+        pool_mut.available_for_funding = pool_mut.available_for_funding + amount;
         
         // Update investor registry
         let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
@@ -145,8 +159,9 @@ module rwfi_addr::spv {
         let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         assert!(pool.available_for_funding >= funding_amount, E_INSUFFICIENT_FUNDS);
         
-        // Transfer APT to supplier from SPV's balance
-        aptos_account::transfer(admin, supplier_addr, funding_amount);
+        // Transfer APT to supplier from treasury account
+        let treasury_signer = account::create_signer_with_capability(&pool.treasury_cap);
+        aptos_account::transfer(&treasury_signer, supplier_addr, funding_amount);
         
         // Update pool
         pool.available_for_funding = pool.available_for_funding - funding_amount;
@@ -226,14 +241,27 @@ module rwfi_addr::spv {
         // Burn INV tokens
         invoice_coin::burn_from_primary_store(@rwfi_addr, investor_addr, inv_tokens_to_redeem);
         
-        // Transfer APT to investor from SPV's balance (admin account owns the APT)
-        // Note: In production, you'd want a more sophisticated mechanism to manage APT from the admin account
-        // For now, this assumes the admin account has sufficient balance
+        // Transfer APT to investor from treasury account
+        let treasury_signer = account::create_signer_with_capability(&pool.treasury_cap);
+        aptos_account::transfer(&treasury_signer, investor_addr, withdrawal_amount);
+        
+        // Update pool to reflect withdrawal
+        let pool_mut = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+        assert!(pool_mut.total_collections >= withdrawal_amount, E_INSUFFICIENT_FUNDS);
+        pool_mut.total_collections = pool_mut.total_collections - withdrawal_amount;
         
         // Update investor data
         investor_data.inv_tokens = investor_data.inv_tokens - inv_tokens_to_redeem;
         investor_data.total_withdrawn = investor_data.total_withdrawn + withdrawal_amount;
         investor_data.last_withdrawal = timestamp::now_seconds();
+    }
+
+    // Helper function to get treasury address
+    #[view]
+    public fun get_treasury_address(): address acquires InvestmentPool {
+        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+        let treasury_signer = account::create_signer_with_capability(&pool.treasury_cap);
+        signer::address_of(&treasury_signer)
     }
 
     // View functions
