@@ -58,8 +58,12 @@ export function useInvestorInfo() {
   const [investorInfo, setInvestorInfo] = useState<{
     joinEpoch: string;
     lastClaimEpoch: string;
+    totalInvested: string;
+    totalWithdrawn: string;
+    invTokens: string;
   } | null>(null);
   const [availableReturns, setAvailableReturns] = useState<string | null>(null);
+  const [aptBalance, setAptBalance] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,6 +74,15 @@ export function useInvestorInfo() {
       setLoading(true);
       setError(null);
       
+      // Get APT balance
+      try {
+        const balance = await aptos.getAccountAPTAmount({ accountAddress: account.address.toString() });
+        setAptBalance(balance.toString());
+      } catch (err) {
+        console.log("Failed to get APT balance:", err);
+        setAptBalance("0");
+      }
+
       // Get investor epoch info
       const epochResult = await aptos.view({
         payload: {
@@ -78,23 +91,35 @@ export function useInvestorInfo() {
         },
       });
 
-      if (epochResult && Array.isArray(epochResult) && epochResult.length >= 2) {
-        setInvestorInfo({
-          joinEpoch: epochResult[0]?.toString() || "0",
-          lastClaimEpoch: epochResult[1]?.toString() || "0",
-        });
-      }
-
-      // Get available returns
-      const returnsResult = await aptos.view({
+      // Get detailed investor info
+      const detailedResult = await aptos.view({
         payload: {
-          function: CONTRACT_FUNCTIONS.CALCULATE_AVAILABLE_RETURNS,
+          function: CONTRACT_FUNCTIONS.GET_INVESTOR_INFO,
           functionArguments: [account.address.toString()],
         },
       });
 
-      if (returnsResult && Array.isArray(returnsResult)) {
-        setAvailableReturns(returnsResult[0]?.toString() || "0");
+      if (epochResult && Array.isArray(epochResult) && epochResult.length >= 2 &&
+          detailedResult && Array.isArray(detailedResult) && detailedResult.length >= 5) {
+        setInvestorInfo({
+          joinEpoch: epochResult[0]?.toString() || "0",
+          lastClaimEpoch: epochResult[1]?.toString() || "0",
+          totalInvested: detailedResult[1]?.toString() || "0",
+          totalWithdrawn: detailedResult[2]?.toString() || "0",
+          invTokens: detailedResult[3]?.toString() || "0",
+        });
+      }
+
+      // Get total withdrawable amount
+      const withdrawableResult = await aptos.view({
+        payload: {
+          function: CONTRACT_FUNCTIONS.CALCULATE_TOTAL_WITHDRAWABLE,
+          functionArguments: [account.address.toString()],
+        },
+      });
+
+      if (withdrawableResult && Array.isArray(withdrawableResult)) {
+        setAvailableReturns(withdrawableResult[0]?.toString() || "0");
       }
     } catch (err) {
       console.error("Error fetching investor info:", err);
@@ -110,7 +135,7 @@ export function useInvestorInfo() {
     }
   }, [account?.address]);
 
-  return { investorInfo, availableReturns, loading, error, refetch: fetchInvestorInfo };
+  return { investorInfo, availableReturns, aptBalance, loading, error, refetch: fetchInvestorInfo };
 }
 
 // Hook for investment transactions
@@ -128,25 +153,15 @@ export function useInvestment() {
       setLoading(true);
       setError(null);
 
-      // Convert amount to u64 string format (no decimals)
-      const amountU64 = Math.floor(Number(amount)).toString();
-
       const transaction: InputTransactionData = {
         data: {
           function: CONTRACT_FUNCTIONS.INVEST_APT,
-          functionArguments: [amountU64],
+          functionArguments: [amount],
         },
       };
 
-      console.log("Submitting investment transaction:", transaction);
       const response = await signAndSubmitTransaction(transaction);
-      console.log("Transaction response:", response);
-      
-      // Wait for transaction to complete
-      if (response.hash) {
-        await aptos.waitForTransaction({ transactionHash: response.hash });
-      }
-      
+      await aptos.waitForTransaction({ transactionHash: response.hash });
       return response;
     } catch (err) {
       console.error("Error investing APT:", err);
@@ -176,9 +191,7 @@ export function useWithdrawal() {
       setLoading(true);
       setError(null);
 
-      // Convert amount to u64 string format (no decimals)
       const amountU64 = Math.floor(Number(invTokenAmount)).toString();
-
       const functionName = useEpochBased 
         ? CONTRACT_FUNCTIONS.WITHDRAW_RETURNS_EPOCH_BASED
         : CONTRACT_FUNCTIONS.WITHDRAW_RETURNS;
@@ -190,15 +203,8 @@ export function useWithdrawal() {
         },
       };
 
-      console.log("Submitting withdrawal transaction:", transaction);
       const response = await signAndSubmitTransaction(transaction);
-      console.log("Transaction response:", response);
-      
-      // Wait for transaction to complete
-      if (response.hash) {
-        await aptos.waitForTransaction({ transactionHash: response.hash });
-      }
-      
+      await aptos.waitForTransaction({ transactionHash: response.hash });
       return response;
     } catch (err) {
       console.error("Error withdrawing returns:", err);

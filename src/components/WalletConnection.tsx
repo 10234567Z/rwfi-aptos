@@ -20,18 +20,11 @@ export const WalletConnection = () => {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <div className="flex flex-col">
-          {connected && account ? (
-            <div className="text-sm">
-              <p className="text-gray-600">Connected:</p>
-              <p className="font-mono text-xs">{account.address.toString()}</p>
-              <p className="text-xs text-gray-500">Network: {network?.name}</p>
-            </div>
-          ) : (
-            <p className="text-gray-600">Not connected</p>
-          )}
-        </div>
-        <WalletSelector />
+        {connected && account ? (
+          <WalletSelector />
+        ) : (
+          <p className="text-gray-600">Not connected</p>
+        )}
       </div>
     </div>
   );

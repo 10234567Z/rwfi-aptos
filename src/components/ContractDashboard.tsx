@@ -14,6 +14,7 @@ import {
   useInvestment,
   useWithdrawal
 } from "@/hooks/useContract";
+import { PoolStats } from "@/components/PoolStats";
 
 export function ContractDashboard() {
   const { account } = useWallet();
@@ -22,8 +23,7 @@ export function ContractDashboard() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
   // Contract hooks
-  const { poolStats, loading: poolLoading, error: poolError, refetch: refetchPool } = usePoolStats();
-  const { investorInfo, availableReturns, loading: investorLoading, refetch: refetchInvestor } = useInvestorInfo();
+  const { investorInfo, availableReturns, aptBalance, loading: investorLoading, refetch: refetchInvestor } = useInvestorInfo();
   const { currentEpoch, loading: epochLoading, refetch: refetchEpoch } = useCurrentEpoch();
   const { investApt, loading: investLoading } = useInvestment();
   const { withdrawReturns, loading: withdrawLoading } = useWithdrawal();
@@ -39,9 +39,7 @@ export function ContractDashboard() {
     }
 
     try {
-      // Convert to APT units (1 APT = 100,000,000 octas)
       const amountInOctas = (Number(investAmount) * 100_000_000).toString();
-      
       await investApt(amountInOctas);
       
       toast({
@@ -50,8 +48,6 @@ export function ContractDashboard() {
       });
       
       setInvestAmount("");
-      // Refresh data
-      refetchPool();
       refetchInvestor();
     } catch (error) {
       toast({
@@ -73,10 +69,8 @@ export function ContractDashboard() {
     }
 
     try {
-      // Convert to token units (assuming 1:1 with octas for simplicity)
       const amountInTokens = (Number(withdrawAmount) * 100_000_000).toString();
-      
-      await withdrawReturns(amountInTokens, true); // Use epoch-based withdrawal
+      await withdrawReturns(amountInTokens, true);
       
       toast({
         title: "Withdrawal Successful",
@@ -84,8 +78,6 @@ export function ContractDashboard() {
       });
       
       setWithdrawAmount("");
-      // Refresh data
-      refetchPool();
       refetchInvestor();
     } catch (error) {
       toast({
@@ -98,38 +90,51 @@ export function ContractDashboard() {
 
   const formatAmount = (amount: string | null) => {
     if (!amount) return "0";
-    // Convert from octas to APT for display
     return (Number(amount) / 100_000_000).toFixed(6);
   };
 
   if (!account) {
     return (
-      <Card>
+      <Card className="bg-gray-800 border-gray-700">
         <CardHeader>
-          <CardTitle>Contract Dashboard</CardTitle>
-          <CardDescription>Connect your wallet to interact with the RWAfi protocol</CardDescription>
+          <CardTitle className="text-white">Contract Dashboard</CardTitle>
+          <CardDescription className="text-gray-400">Connect your wallet to interact with the RWAfi protocol</CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground">Please connect your wallet to access the dashboard.</p>
+          <p className="text-gray-400">Please connect your wallet to access the dashboard.</p>
         </CardContent>
       </Card>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      {/* Dashboard Header */}
+      <div className="text-center">
+        <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+          Investment Dashboard
+        </h2>
+        <p className="text-gray-400">Manage your RWAfi investments and track returns</p>
+      </div>
+
+      {/* Pool Statistics */}
+      <div>
+        <h3 className="text-xl font-semibold text-white mb-4">Pool Statistics</h3>
+        <PoolStats />
+      </div>
+
       {/* Current Epoch */}
-      <Card>
+      <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
         <CardHeader>
-          <CardTitle>Current Epoch</CardTitle>
+          <CardTitle className="text-white">Current Epoch</CardTitle>
         </CardHeader>
         <CardContent>
           {epochLoading ? (
-            <p>Loading...</p>
+            <p className="text-gray-400">Loading...</p>
           ) : (
             <div className="flex items-center justify-between">
-              <span className="text-2xl font-bold">{currentEpoch || "0"}</span>
-              <Button variant="outline" size="sm" onClick={refetchEpoch}>
+              <span className="text-2xl font-bold text-white">{currentEpoch || "0"}</span>
+              <Button variant="outline" size="sm" onClick={refetchEpoch} className="border-gray-600 text-gray-300 bg-gray-800/50">
                 Refresh
               </Button>
             </div>
@@ -137,102 +142,41 @@ export function ContractDashboard() {
         </CardContent>
       </Card>
 
-      {/* Pool Statistics */}
-      <Card>
+      {/* Your Portfolio */}
+      <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
         <CardHeader>
-          <CardTitle>Pool Statistics</CardTitle>
-          <CardDescription>Current state of the investment pool</CardDescription>
+          <CardTitle className="text-white">Your Portfolio</CardTitle>
+          <CardDescription className="text-gray-400">Your investment summary and available actions</CardDescription>
         </CardHeader>
         <CardContent>
-          {poolLoading ? (
-            <p>Loading pool statistics...</p>
-          ) : poolError ? (
-            <div className="text-red-500">
-              <p>Error: {poolError}</p>
-              <Button variant="outline" size="sm" onClick={refetchPool} className="mt-2">
-                Retry
-              </Button>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-gray-800/50 rounded-lg p-4">
+              <p className="text-sm text-gray-400 mb-1">APT Balance</p>
+              <p className="text-2xl font-bold text-white">{formatAmount(aptBalance)} APT</p>
             </div>
-          ) : poolStats ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Invested</p>
-                <p className="text-xl font-semibold">{formatAmount(poolStats.totalInvested)} APT</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Total Collections</p>
-                <p className="text-xl font-semibold">{formatAmount(poolStats.totalCollections)} APT</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Available for Funding</p>
-                <p className="text-xl font-semibold">{formatAmount(poolStats.availableForFunding)} APT</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Total Funded Incomes</p>
-                <p className="text-xl font-semibold">{formatAmount(poolStats.totalFundedIncomes)} APT</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Reserved</p>
-                <p className="text-xl font-semibold">{formatAmount(poolStats.reserved)} APT</p>
-              </div>
-              <div className="flex items-center">
-                <Button variant="outline" size="sm" onClick={refetchPool}>
-                  Refresh
-                </Button>
-              </div>
+            <div className="bg-gray-800/50 rounded-lg p-4">
+              <p className="text-sm text-gray-400 mb-1">INV Tokens</p>
+              <p className="text-2xl font-bold text-blue-400">{formatAmount(investorInfo?.invTokens || "0")} INV</p>
             </div>
-          ) : (
-            <p>No pool data available</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Investor Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Your Investment</CardTitle>
-          <CardDescription>Your current position in the pool</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {investorLoading ? (
-            <p>Loading investor information...</p>
-          ) : (
-            <div className="space-y-4">
-              {investorInfo && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Join Epoch</p>
-                    <p className="text-xl font-semibold">{investorInfo.joinEpoch}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Last Claim Epoch</p>
-                    <p className="text-xl font-semibold">{investorInfo.lastClaimEpoch}</p>
-                  </div>
-                </div>
-              )}
-              <div>
-                <p className="text-sm text-muted-foreground">Available Returns</p>
-                <p className="text-xl font-semibold">{formatAmount(availableReturns)} APT</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={refetchInvestor}>
-                Refresh
-              </Button>
+            <div className="bg-gray-800/50 rounded-lg p-4">
+              <p className="text-sm text-gray-400 mb-1">Available Returns</p>
+              <p className="text-2xl font-bold text-green-400">{formatAmount(availableReturns)} APT</p>
             </div>
-          )}
+          </div>
         </CardContent>
       </Card>
 
       {/* Investment Actions */}
       <div className="grid md:grid-cols-2 gap-6">
         {/* Invest */}
-        <Card>
+        <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
           <CardHeader>
-            <CardTitle>Invest APT</CardTitle>
-            <CardDescription>Add liquidity to the investment pool</CardDescription>
+            <CardTitle className="text-white">Invest APT</CardTitle>
+            <CardDescription className="text-gray-400">Add liquidity to the investment pool</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label htmlFor="invest-amount">Amount (APT)</Label>
+              <Label htmlFor="invest-amount" className="text-gray-300">Amount (APT)</Label>
               <Input
                 id="invest-amount"
                 type="number"
@@ -240,12 +184,16 @@ export function ContractDashboard() {
                 value={investAmount}
                 onChange={(e) => setInvestAmount(e.target.value)}
                 disabled={investLoading}
+                className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-500"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Minimum investment: 1 APT
+              </p>
             </div>
             <Button 
               onClick={handleInvest} 
               disabled={investLoading || !investAmount}
-              className="w-full"
+              className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white"
             >
               {investLoading ? "Investing..." : "Invest APT"}
             </Button>
@@ -253,14 +201,14 @@ export function ContractDashboard() {
         </Card>
 
         {/* Withdraw */}
-        <Card>
+        <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
           <CardHeader>
-            <CardTitle>Withdraw Returns</CardTitle>
-            <CardDescription>Withdraw your earned returns</CardDescription>
+            <CardTitle className="text-white">Withdraw Returns</CardTitle>
+            <CardDescription className="text-gray-400">Withdraw your investment and returns</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label htmlFor="withdraw-amount">Amount (Tokens)</Label>
+              <Label htmlFor="withdraw-amount" className="text-gray-300">Amount (Tokens)</Label>
               <Input
                 id="withdraw-amount"
                 type="number"
@@ -268,13 +216,16 @@ export function ContractDashboard() {
                 value={withdrawAmount}
                 onChange={(e) => setWithdrawAmount(e.target.value)}
                 disabled={withdrawLoading}
+                className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-500"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Available: {formatAmount(investorInfo?.invTokens || "0")} INV tokens
+              </p>
             </div>
             <Button 
               onClick={handleWithdraw} 
               disabled={withdrawLoading || !withdrawAmount}
-              className="w-full"
-              variant="outline"
+              className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white"
             >
               {withdrawLoading ? "Withdrawing..." : "Withdraw Returns"}
             </Button>
