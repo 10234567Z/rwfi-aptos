@@ -1,0 +1,311 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { INCOME_TYPES, INCOME_STATUS } from "@/utils/aptosClient";
+
+interface Invoice {
+  id: string;
+  amount: string;
+  due_date: number;
+  income_type: number;
+  payer_info: string;
+  payer_contact: string;
+  description: string;
+  status: number;
+  created_at: number;
+  funded_amount?: string;
+}
+
+export function InvoiceManagement() {
+  const { account } = useWallet();
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const getStatusColor = (status: number) => {
+    switch (status) {
+      case INCOME_STATUS.PENDING: return "text-yellow-400 bg-yellow-400/10";
+      case INCOME_STATUS.FUNDED: return "text-green-400 bg-green-400/10";
+      case INCOME_STATUS.CANCELLED: return "text-red-400 bg-red-400/10";
+      case INCOME_STATUS.COLLECTED: return "text-purple-400 bg-purple-400/10";
+      default: return "text-gray-400 bg-gray-400/10";
+    }
+  };
+
+  const getStatusText = (status: number) => {
+    switch (status) {
+      case INCOME_STATUS.PENDING: return "Pending Review";
+      case INCOME_STATUS.FUNDED: return "Funded";
+      case INCOME_STATUS.CANCELLED: return "Cancelled";
+      case INCOME_STATUS.COLLECTED: return "Collected";
+      default: return "Unknown";
+    }
+  };
+
+  const getIncomeTypeName = (type: number) => {
+    const typeNames: Record<number, string> = {
+      [INCOME_TYPES.SALARY]: "Salary",
+      [INCOME_TYPES.SUBSCRIPTION]: "Subscription", 
+      [INCOME_TYPES.FREELANCE]: "Freelance",
+      [INCOME_TYPES.BUSINESS_INVOICE]: "Business Invoice",
+      [INCOME_TYPES.OTHER]: "Other"
+    };
+    return typeNames[type] || "Unknown";
+  };
+
+  const formatAmount = (amount: string) => {
+    return (parseInt(amount) / 100_000_000).toFixed(2);
+  };
+
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp * 1000).toLocaleDateString();
+  };
+
+  const formatDaysUntilDue = (dueDate: number) => {
+    const now = Math.floor(Date.now() / 1000);
+    const daysUntilDue = Math.ceil((dueDate - now) / (24 * 60 * 60));
+    
+    if (daysUntilDue < 0) {
+      return `${Math.abs(daysUntilDue)} days overdue`;
+    } else if (daysUntilDue === 0) {
+      return "Due today";
+    } else {
+      return `${daysUntilDue} days until due`;
+    }
+  };
+
+  const parsePayer = (payerInfo: string) => {
+    try {
+      return JSON.parse(payerInfo);
+    } catch {
+      return { name: payerInfo };
+    }
+  };
+
+  // Mock data for demonstration - in real implementation, this would fetch from the contract
+  const mockInvoices: Invoice[] = [
+    {
+      id: "1",
+      amount: "500000000000", // 5000 APT in octas
+      due_date: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60), // 30 days from now
+      income_type: INCOME_TYPES.BUSINESS_INVOICE,
+      payer_info: JSON.stringify({ name: "Tech Corp Ltd", email: "payments@techcorp.com" }),
+      payer_contact: "payments@techcorp.com",
+      description: "Website development project final payment",
+      status: INCOME_STATUS.FUNDED,
+      created_at: Math.floor(Date.now() / 1000) - (5 * 24 * 60 * 60), // 5 days ago
+      funded_amount: "450000000000" // 4500 APT (90%)
+    },
+    {
+      id: "2", 
+      amount: "200000000000", // 2000 APT in octas
+      due_date: Math.floor(Date.now() / 1000) + (15 * 24 * 60 * 60), // 15 days from now
+      income_type: INCOME_TYPES.FREELANCE,
+      payer_info: JSON.stringify({ name: "Digital Agency", email: "finance@digitalagency.com", phone: "+1-555-0123" }),
+      payer_contact: "finance@digitalagency.com",
+      description: "Mobile app UI/UX design services",
+      status: INCOME_STATUS.PENDING,
+      created_at: Math.floor(Date.now() / 1000) - (2 * 24 * 60 * 60) // 2 days ago
+    },
+    {
+      id: "3",
+      amount: "800000000000", // 8000 APT in octas  
+      due_date: Math.floor(Date.now() / 1000) + (45 * 24 * 60 * 60), // 45 days from now
+      income_type: INCOME_TYPES.BUSINESS_INVOICE,
+      payer_info: JSON.stringify({ name: "Enterprise Solutions Inc", email: "ap@enterprise.com" }),
+      payer_contact: "ap@enterprise.com", 
+      description: "Q4 consulting services",
+      status: INCOME_STATUS.PENDING, // Changed from APPROVED to PENDING
+      created_at: Math.floor(Date.now() / 1000) - (1 * 24 * 60 * 60) // 1 day ago
+    }
+  ];
+
+  useEffect(() => {
+    if (account) {
+      setLoading(true);
+      // Simulate API call delay
+      setTimeout(() => {
+        setInvoices(mockInvoices);
+        setLoading(false);
+      }, 1000);
+    }
+  }, [account]);
+
+  if (!account) {
+    return (
+      <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
+        <CardContent className="p-6 text-center">
+          <p className="text-gray-400">Connect your wallet to view your invoices</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
+      <CardHeader>
+        <CardTitle className="text-white flex items-center">
+          <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg flex items-center justify-center mr-3">
+            📋
+          </div>
+          Your Invoices
+        </CardTitle>
+        <CardDescription className="text-gray-400">
+          Manage and track your submitted invoices and their funding status
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        {loading ? (
+          <div className="text-center py-8">
+            <p className="text-gray-400">Loading your invoices...</p>
+          </div>
+        ) : invoices.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-gray-400 mb-4">No invoices found</p>
+            <p className="text-sm text-gray-500">Create your first invoice to get started</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {invoices.map((invoice) => {
+              const payer = parsePayer(invoice.payer_info);
+              const statusColor = getStatusColor(invoice.status);
+              
+              return (
+                <div key={invoice.id} className="bg-gray-800/30 rounded-lg p-4 border border-gray-700">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h4 className="text-white font-semibold">{invoice.description}</h4>
+                      <p className="text-gray-400 text-sm">
+                        Invoice #{invoice.id} • {getIncomeTypeName(invoice.income_type)}
+                      </p>
+                    </div>
+                    <div className={`px-2 py-1 rounded text-xs font-medium ${statusColor}`}>
+                      {getStatusText(invoice.status)}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-400">Amount:</span>
+                      <span className="ml-2 text-white font-semibold">
+                        {formatAmount(invoice.amount)} APT
+                      </span>
+                      {invoice.funded_amount && (
+                        <div className="text-green-400 text-xs">
+                          Funded: {formatAmount(invoice.funded_amount)} APT
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <span className="text-gray-400">Payer:</span>
+                      <span className="ml-2 text-white">{payer.name}</span>
+                      {payer.email && (
+                        <div className="text-blue-400 text-xs">{payer.email}</div>
+                      )}
+                    </div>
+
+                    <div>
+                      <span className="text-gray-400">Due Date:</span>
+                      <span className="ml-2 text-white">{formatDate(invoice.due_date)}</span>
+                      <div className="text-yellow-400 text-xs">
+                        {formatDaysUntilDue(invoice.due_date)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-gray-700 flex justify-between items-center">
+                    <div className="text-xs text-gray-500">
+                      Created: {formatDate(invoice.created_at)}
+                    </div>
+                    
+                    <div className="flex space-x-2">
+                      {invoice.status === INCOME_STATUS.PENDING && (
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          className="text-xs bg-yellow-600/20 border-yellow-600 text-yellow-400 hover:bg-yellow-600/30"
+                        >
+                          Under Review
+                        </Button>
+                      )}
+                      
+                      {invoice.status === INCOME_STATUS.FUNDED && (
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          className="text-xs bg-blue-600/20 border-blue-600 text-blue-400 hover:bg-blue-600/30"
+                        >
+                          View Details
+                        </Button>
+                      )}
+                      
+                      {invoice.status === INCOME_STATUS.COLLECTED && (
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          className="text-xs bg-purple-600/20 border-purple-600 text-purple-400 hover:bg-purple-600/30"
+                        >
+                          Completed
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Summary Stats */}
+        {invoices.length > 0 && (
+          <div className="mt-6 pt-6 border-t border-gray-700">
+            <h4 className="text-white font-semibold mb-3">Summary</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div className="bg-gray-800/30 rounded p-3 text-center">
+                <div className="text-white font-semibold">
+                  {invoices.length}
+                </div>
+                <div className="text-gray-400 text-xs">Total Invoices</div>
+              </div>
+              
+              <div className="bg-gray-800/30 rounded p-3 text-center">
+                <div className="text-green-400 font-semibold">
+                  {formatAmount(
+                    invoices
+                      .filter(inv => inv.status === INCOME_STATUS.FUNDED)
+                      .reduce((sum, inv) => sum + parseInt(inv.funded_amount || "0"), 0)
+                      .toString()
+                  )} APT
+                </div>
+                <div className="text-gray-400 text-xs">Funded Amount</div>
+              </div>
+
+              <div className="bg-gray-800/30 rounded p-3 text-center">
+                <div className="text-yellow-400 font-semibold">
+                  {invoices.filter(inv => inv.status === INCOME_STATUS.PENDING).length}
+                </div>
+                <div className="text-gray-400 text-xs">Pending Review</div>
+              </div>
+
+              <div className="bg-gray-800/30 rounded p-3 text-center">
+                <div className="text-blue-400 font-semibold">
+                  {formatAmount(
+                    invoices
+                      .filter(inv => inv.status === INCOME_STATUS.PENDING)
+                      .reduce((sum, inv) => sum + parseInt(inv.amount), 0)
+                      .toString()
+                  )} APT
+                </div>
+                <div className="text-gray-400 text-xs">Pending Value</div>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

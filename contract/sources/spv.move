@@ -68,6 +68,7 @@ module rwfi_addr::spv {
         last_withdrawal: u64, // Timestamp of last withdrawal
         join_epoch: u64, // When they first invested (epoch ID)
         last_claim_epoch: u64, // Last epoch they claimed returns from
+        investment_timestamp: u64, // Timestamp when they first invested
     }
 
     struct FundedIncome has store, copy, drop {
@@ -154,12 +155,14 @@ module rwfi_addr::spv {
         days_overdue: u64,
     }
 
-    // Epoch-based withdrawal system structs
+    // Epoch-based withdrawal system structs - now tracks funding time
     struct CollectionEpoch has store, copy, drop {
         epoch_id: u64,
         collections_amount: u64,
         total_inv_supply_at_epoch: u64,
         timestamp: u64,
+        funded_timestamp: u64, // When the underlying invoice was funded
+        funded_income_id: u64, // Reference to the funded income
     }
 
     struct EpochRegistry has key {
@@ -268,10 +271,12 @@ module rwfi_addr::spv {
         let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
         let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
         let current_epoch = epoch_registry.current_epoch;
+        let investment_time = timestamp::now_seconds();
         
         if (table::contains(&registry.investors, investor_addr)) {
             let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
             investor_data.total_invested = investor_data.total_invested + amount;
+            // Don't update investment_timestamp for existing investors - keep original timestamp
         } else {
             table::upsert(&mut registry.investors, investor_addr, Investor {
                 total_invested: amount,
@@ -280,6 +285,7 @@ module rwfi_addr::spv {
                 last_withdrawal: 0,
                 join_epoch: current_epoch, // Record when they joined
                 last_claim_epoch: current_epoch, // Start claiming from current epoch
+                investment_timestamp: investment_time, // Critical: when they invested
             });
             registry.total_investors = registry.total_investors + 1;
         };
@@ -544,8 +550,8 @@ module rwfi_addr::spv {
         let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         pool.total_collections = pool.total_collections + collected_amount;
         
-        // Create new epoch when collections happen
-        create_new_epoch_internal(collected_amount);
+        // Create new epoch when collections happen - now with funding timestamp
+        create_new_epoch_internal(collected_amount, funded_income.funded_at, funded_income_id);
         
         // Update supplier risk profile on successful payment
         let risk_registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
@@ -559,8 +565,8 @@ module rwfi_addr::spv {
         accrued_income_registry::mark_income_collected(funded_income.supplier_addr, funded_income.income_id);
     }
 
-    // Internal function to create new epoch when collections happen
-    fun create_new_epoch_internal(collected_amount: u64) acquires EpochRegistry {
+    // Internal function to create new epoch when collections happen - now tracks funding time
+    fun create_new_epoch_internal(collected_amount: u64, funded_timestamp: u64, funded_income_id: u64) acquires EpochRegistry {
         let epoch_registry = borrow_global_mut<EpochRegistry>(@rwfi_addr);
         
         // Get current total INV supply at this moment
@@ -574,7 +580,9 @@ module rwfi_addr::spv {
             epoch_id: epoch_registry.current_epoch,
             collections_amount: collected_amount,
             total_inv_supply_at_epoch: total_inv_supply,
-            timestamp: timestamp::now_seconds(),
+            timestamp: timestamp::now_seconds(), // When collection happened
+            funded_timestamp, // When the invoice was originally funded
+            funded_income_id, // Reference to the funded income
         };
         
         table::upsert(&mut epoch_registry.epochs, epoch_registry.current_epoch, new_epoch);
@@ -820,8 +828,8 @@ module rwfi_addr::spv {
         investor_data.last_withdrawal = timestamp::now_seconds();
     }
 
-    // New epoch-based withdrawal system - prevents "late investor advantage"
-    public entry fun withdraw_returns_epoch_based(
+    // New timestamp-based withdrawal system - only returns from invoices funded AFTER investment
+    public entry fun withdraw_returns_timestamp_based(
         investor: &signer,
         inv_tokens_to_redeem: u64
     ) acquires InvestmentPool, InvestorRegistry, EpochRegistry {
@@ -833,23 +841,32 @@ module rwfi_addr::spv {
         let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
         assert!(investor_data.inv_tokens >= inv_tokens_to_redeem, E_INVALID_WITHDRAWAL_AMOUNT);
         
-        // Get epoch data first before calling calculation function
-        let join_epoch = investor_data.join_epoch;
-        let last_claim_epoch = investor_data.last_claim_epoch;
+        // Get investor's investment timestamp
+        let investment_timestamp = investor_data.investment_timestamp;
         let current_epoch = {
             let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
-            assert!(epoch_registry.total_epochs > 0, E_NO_RETURNS_AVAILABLE);
             epoch_registry.current_epoch
         };
         
-        // Calculate returns from epochs after investor joined
-        let withdrawal_amount = calculate_epoch_based_returns(
+        // Calculate returns only from invoices funded AFTER investment
+        let withdrawal_amount = calculate_timestamp_based_returns(
             inv_tokens_to_redeem,
-            join_epoch,
-            last_claim_epoch
+            investment_timestamp
         );
         
-        assert!(withdrawal_amount > 0, E_NO_RETURNS_AVAILABLE);
+        // If no returns available, return original APT (0% returns case)
+        let final_withdrawal_amount = if (withdrawal_amount == 0) {
+            // Calculate proportional share of original investment to return
+            let total_inv_supply = invoice_coin::get_total_supply();
+            let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+            
+            // Return proportional share of total invested (not collections)
+            (inv_tokens_to_redeem * pool.total_apt_invested) / total_inv_supply
+        } else {
+            withdrawal_amount
+        };
+        
+        assert!(final_withdrawal_amount > 0, E_INVALID_WITHDRAWAL_AMOUNT);
         
         // Burn INV tokens
         invoice_coin::burn_from_primary_store(@rwfi_addr, investor_addr, inv_tokens_to_redeem);
@@ -857,40 +874,45 @@ module rwfi_addr::spv {
         // Transfer APT to investor from treasury account
         let pool = borrow_global<InvestmentPool>(@rwfi_addr);
         let treasury_signer = account::create_signer_with_capability(&pool.treasury_cap);
-        aptos_account::transfer(&treasury_signer, investor_addr, withdrawal_amount);
+        aptos_account::transfer(&treasury_signer, investor_addr, final_withdrawal_amount);
         
-        // Update pool to reflect withdrawal
+        // Update pool accounting
         let pool_mut = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        assert!(pool_mut.total_collections >= withdrawal_amount, E_INSUFFICIENT_FUNDS);
-        pool_mut.total_collections = pool_mut.total_collections - withdrawal_amount;
+        if (final_withdrawal_amount <= pool_mut.total_collections) {
+            // Withdrawing from returns
+            pool_mut.total_collections = pool_mut.total_collections - final_withdrawal_amount;
+        } else {
+            // Returning original investment (0% returns case)
+            let excess = final_withdrawal_amount - pool_mut.total_collections;
+            pool_mut.total_collections = 0;
+            pool_mut.total_apt_invested = pool_mut.total_apt_invested - excess;
+        };
         
         // Update investor data
         investor_data.inv_tokens = investor_data.inv_tokens - inv_tokens_to_redeem;
-        investor_data.total_withdrawn = investor_data.total_withdrawn + withdrawal_amount;
+        investor_data.total_withdrawn = investor_data.total_withdrawn + final_withdrawal_amount;
         investor_data.last_withdrawal = timestamp::now_seconds();
-        investor_data.last_claim_epoch = current_epoch; // Update last claimed epoch
     }
 
-    // Calculate returns based on epochs after investor joined
-    fun calculate_epoch_based_returns(
+    // Calculate returns based on timestamp - only from invoices funded AFTER investment
+    fun calculate_timestamp_based_returns(
         inv_tokens_to_redeem: u64,
-        join_epoch: u64,
-        last_claim_epoch: u64
+        investment_timestamp: u64
     ): u64 acquires EpochRegistry {
         let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
         let total_returns = 0u64;
         
-        // Start from the epoch after they last claimed (or joined)
-        let start_epoch = if (last_claim_epoch > join_epoch) { last_claim_epoch } else { join_epoch };
-        let i = start_epoch + 1;
-        
-        // Sum up returns from all epochs after investor joined/last claimed
+        // Iterate through all epochs
+        let i = 1u64;
         while (i <= epoch_registry.current_epoch) {
             if (table::contains(&epoch_registry.epochs, i)) {
                 let epoch = table::borrow(&epoch_registry.epochs, i);
                 
-                // Only count epochs with collections
-                if (epoch.collections_amount > 0 && epoch.total_inv_supply_at_epoch > 0) {
+                // Only include epochs where the invoice was funded AFTER investor's investment
+                if (epoch.funded_timestamp > investment_timestamp && 
+                    epoch.collections_amount > 0 && 
+                    epoch.total_inv_supply_at_epoch > 0) {
+                    
                     // Calculate proportional share of this epoch's collections
                     let investor_share = (inv_tokens_to_redeem * epoch.collections_amount) / epoch.total_inv_supply_at_epoch;
                     total_returns = total_returns + investor_share;
@@ -924,13 +946,13 @@ module rwfi_addr::spv {
     }
 
     #[view]
-    public fun get_investor_info(investor_addr: address): (bool, u64, u64, u64, u64) acquires InvestorRegistry {
+    public fun get_investor_info(investor_addr: address): (bool, u64, u64, u64, u64, u64) acquires InvestorRegistry {
         let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         if (table::contains(&registry.investors, investor_addr)) {
             let investor = table::borrow(&registry.investors, investor_addr);
-            (true, investor.total_invested, investor.total_withdrawn, investor.inv_tokens, investor.last_withdrawal)
+            (true, investor.total_invested, investor.total_withdrawn, investor.inv_tokens, investor.last_withdrawal, investor.investment_timestamp)
         } else {
-            (false, 0, 0, 0, 0)
+            (false, 0, 0, 0, 0, 0)
         }
     }
 
@@ -1060,16 +1082,16 @@ module rwfi_addr::spv {
         overdue_list
     }
 
-    // View functions for epoch-based system
+    // View functions for timestamp-based system
     #[view]
-    public fun get_epoch_info(epoch_id: u64): (bool, u64, u64, u64, u64) acquires EpochRegistry {
+    public fun get_epoch_info(epoch_id: u64): (bool, u64, u64, u64, u64, u64, u64) acquires EpochRegistry {
         let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
         
         if (table::contains(&epoch_registry.epochs, epoch_id)) {
             let epoch = table::borrow(&epoch_registry.epochs, epoch_id);
-            (true, epoch.epoch_id, epoch.collections_amount, epoch.total_inv_supply_at_epoch, epoch.timestamp)
+            (true, epoch.epoch_id, epoch.collections_amount, epoch.total_inv_supply_at_epoch, epoch.timestamp, epoch.funded_timestamp, epoch.funded_income_id)
         } else {
-            (false, 0, 0, 0, 0)
+            (false, 0, 0, 0, 0, 0, 0)
         }
     }
 
@@ -1100,10 +1122,9 @@ module rwfi_addr::spv {
         };
         
         let investor_data = table::borrow(&registry.investors, investor_addr);
-        calculate_epoch_based_returns(
+        calculate_timestamp_based_returns(
             investor_data.inv_tokens,
-            investor_data.join_epoch,
-            investor_data.last_claim_epoch
+            investor_data.investment_timestamp
         )
     }
 
@@ -1116,6 +1137,33 @@ module rwfi_addr::spv {
         } else {
             false
         }
+    }
+
+    #[view]
+    public fun calculate_withdrawal_amount_timestamp_based(investor_addr: address, inv_tokens: u64): (u64, u64) acquires InvestmentPool, InvestorRegistry, EpochRegistry {
+        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
+        if (!table::contains(&registry.investors, investor_addr)) {
+            return (0, 0)
+        };
+        
+        let investor_data = table::borrow(&registry.investors, investor_addr);
+        let returns_amount = calculate_timestamp_based_returns(inv_tokens, investor_data.investment_timestamp);
+        
+        // Calculate total withdrawable amount (returns + original if no returns)
+        let total_withdrawable = if (returns_amount == 0) {
+            // Return original investment (0% returns case)
+            let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+            let total_inv_supply = invoice_coin::get_total_supply();
+            if (total_inv_supply > 0) {
+                (inv_tokens * pool.total_apt_invested) / total_inv_supply
+            } else {
+                0
+            }
+        } else {
+            returns_amount
+        };
+        
+        (total_withdrawable, returns_amount)
     }
 
     #[view]

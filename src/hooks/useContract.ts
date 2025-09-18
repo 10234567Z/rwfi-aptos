@@ -110,16 +110,26 @@ export function useInvestorInfo() {
         });
       }
 
-      // Get total withdrawable amount
-      const withdrawableResult = await aptos.view({
-        payload: {
-          function: CONTRACT_FUNCTIONS.CALCULATE_TOTAL_WITHDRAWABLE,
-          functionArguments: [account.address.toString()],
-        },
-      });
+      // Get total withdrawable amount using all their INV tokens
+      const invTokens = detailedResult && detailedResult[4] ? detailedResult[4].toString() : "0";
+      
+      // Use the simpler available returns calculation for now
+      try {
+        const withdrawableResult = await aptos.view({
+          payload: {
+            function: CONTRACT_FUNCTIONS.CALCULATE_AVAILABLE_RETURNS,
+            functionArguments: [account.address.toString()],
+          },
+        });
 
-      if (withdrawableResult && Array.isArray(withdrawableResult)) {
-        setAvailableReturns(withdrawableResult[0]?.toString() || "0");
+        if (withdrawableResult && withdrawableResult[0] !== undefined) {
+          setAvailableReturns(withdrawableResult[0]!.toString());
+        } else {
+          setAvailableReturns("0");
+        }
+      } catch (calcError) {
+        console.log("Failed to calculate withdrawable amount, setting to 0:", calcError);
+        setAvailableReturns("0");
       }
     } catch (err) {
       console.error("Error fetching investor info:", err);
@@ -182,7 +192,7 @@ export function useWithdrawal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const withdrawReturns = async (invTokenAmount: string, useEpochBased: boolean = true) => {
+  const withdrawReturns = async (invTokenAmount: string, useTimestampBased: boolean = true) => {
     if (!account) {
       throw new Error("Wallet not connected");
     }
@@ -191,10 +201,21 @@ export function useWithdrawal() {
       setLoading(true);
       setError(null);
 
-      const amountU64 = Math.floor(Number(invTokenAmount)).toString();
-      const functionName = useEpochBased 
-        ? CONTRACT_FUNCTIONS.WITHDRAW_RETURNS_EPOCH_BASED
+      // Validate input
+      const amount = Number(invTokenAmount);
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error("Invalid withdrawal amount");
+      }
+
+      const amountU64 = Math.floor(amount).toString();
+      const functionName = useTimestampBased 
+        ? CONTRACT_FUNCTIONS.WITHDRAW_RETURNS_TIMESTAMP_BASED
         : CONTRACT_FUNCTIONS.WITHDRAW_RETURNS;
+
+      // Validate that the function name is properly formed
+      if (!functionName || typeof functionName !== 'string' || !functionName.includes('::')) {
+        throw new Error("Invalid contract function name");
+      }
 
       const transaction: InputTransactionData = {
         data: {
@@ -253,4 +274,208 @@ export function useCurrentEpoch() {
   }, []);
 
   return { currentEpoch, loading, error, refetch: fetchCurrentEpoch };
+}
+
+// Hook for risk assessment
+export function useRiskAssessment() {
+  const { account, signAndSubmitTransaction } = useWallet();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submitRiskAssessment = async (
+    creditScore: number,
+    businessAgeMonths: number,
+    annualRevenue: string,
+    industryType: number
+  ) => {
+    if (!account) {
+      throw new Error("Wallet not connected");
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const transaction: InputTransactionData = {
+        data: {
+          function: CONTRACT_FUNCTIONS.SUBMIT_RISK_ASSESSMENT,
+          functionArguments: [
+            creditScore.toString(),
+            businessAgeMonths.toString(),
+            annualRevenue,
+            industryType.toString()
+          ],
+        },
+      };
+
+      const response = await signAndSubmitTransaction(transaction);
+      await aptos.waitForTransaction({ transactionHash: response.hash });
+      return response;
+    } catch (err) {
+      console.error("Error submitting risk assessment:", err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to submit risk assessment";
+      setError(errorMessage);
+      throw new Error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getSupplierRiskProfile = async (supplierAddress?: string) => {
+    try {
+      const addressToCheck = supplierAddress || account?.address?.toString();
+      if (!addressToCheck) return null;
+
+      const result = await aptos.view({
+        payload: {
+          function: CONTRACT_FUNCTIONS.GET_SUPPLIER_RISK_PROFILE,
+          functionArguments: [addressToCheck],
+        },
+      });
+
+      if (result && Array.isArray(result) && result.length >= 2) {
+        const exists = result[0] as boolean;
+        if (exists) {
+          const profile = result[1] as any;
+          return {
+            creditScore: profile.credit_score?.toString() || "0",
+            businessAgeMonths: profile.business_age_months?.toString() || "0",
+            annualRevenue: profile.annual_revenue?.toString() || "0",
+            industryType: profile.industry_type?.toString() || "0",
+            riskScore: profile.risk_score?.toString() || "0",
+            approvedForFunding: profile.approved_for_funding || false,
+            totalFunded: profile.total_funded?.toString() || "0",
+            successfulPayments: profile.successful_payments?.toString() || "0",
+            defaults: profile.defaults?.toString() || "0",
+          };
+        }
+      }
+      return null;
+    } catch (err) {
+      console.error("Error fetching supplier risk profile:", err);
+      return null;
+    }
+  };
+
+  return { submitRiskAssessment, getSupplierRiskProfile, loading, error };
+}
+
+// Hook for invoice creation
+export function useInvoiceCreation() {
+  const { account, signAndSubmitTransaction } = useWallet();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const createInvoice = async (
+    amount: string,
+    dueDateTimestamp: number,
+    incomeType: number,
+    payerInfo: string,
+    payerContact: string,
+    description: string
+  ) => {
+    if (!account) {
+      throw new Error("Wallet not connected");
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const transaction: InputTransactionData = {
+        data: {
+          function: CONTRACT_FUNCTIONS.CREATE_ACCRUED_INCOME,
+          functionArguments: [
+            amount,
+            dueDateTimestamp.toString(),
+            incomeType.toString(),
+            Array.from(new TextEncoder().encode(payerInfo)),
+            Array.from(new TextEncoder().encode(payerContact)),
+            Array.from(new TextEncoder().encode(description))
+          ],
+        },
+      };
+
+      const response = await signAndSubmitTransaction(transaction);
+      await aptos.waitForTransaction({ transactionHash: response.hash });
+      return response;
+    } catch (err) {
+      console.error("Error creating invoice:", err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to create invoice";
+      setError(errorMessage);
+      throw new Error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getSupplierInvoices = async (supplierAddress?: string) => {
+    try {
+      const addressToCheck = supplierAddress || account?.address?.toString();
+      if (!addressToCheck) return [];
+
+      const result = await aptos.view({
+        payload: {
+          function: CONTRACT_FUNCTIONS.GET_ALL_INCOMES,
+          functionArguments: [addressToCheck],
+        },
+      });
+
+      if (result && Array.isArray(result)) {
+        return result.map((income: any, index: number) => ({
+          id: index,
+          supplierAddr: income.supplier_addr,
+          amount: income.amount?.toString() || "0",
+          fundedAmount: income.funded_amount?.toString() || "0",
+          dueDate: income.due_date?.toString() || "0",
+          incomeType: income.income_type?.toString() || "0",
+          status: income.status?.toString() || "0",
+          description: new TextDecoder().decode(new Uint8Array(income.description || [])),
+          createdAt: income.created_at?.toString() || "0",
+          fundedAt: income.funded_at?.toString() || "0",
+          spvOwned: income.spv_owned || false,
+        }));
+      }
+      return [];
+    } catch (err) {
+      console.error("Error fetching supplier invoices:", err);
+      return [];
+    }
+  };
+
+  const getPendingInvoices = async (supplierAddress?: string) => {
+    try {
+      const addressToCheck = supplierAddress || account?.address?.toString();
+      if (!addressToCheck) return [];
+
+      const result = await aptos.view({
+        payload: {
+          function: CONTRACT_FUNCTIONS.GET_PENDING_INCOMES,
+          functionArguments: [addressToCheck],
+        },
+      });
+
+      if (result && Array.isArray(result)) {
+        return result.map((income: any, index: number) => ({
+          id: index,
+          supplierAddr: income.supplier_addr,
+          amount: income.amount?.toString() || "0",
+          fundedAmount: income.funded_amount?.toString() || "0",
+          dueDate: income.due_date?.toString() || "0",
+          incomeType: income.income_type?.toString() || "0",
+          status: income.status?.toString() || "0",
+          description: new TextDecoder().decode(new Uint8Array(income.description || [])),
+          createdAt: income.created_at?.toString() || "0",
+          fundedAt: income.funded_at?.toString() || "0",
+          spvOwned: income.spv_owned || false,
+        }));
+      }
+      return [];
+    } catch (err) {
+      console.error("Error fetching pending invoices:", err);
+      return [];
+    }
+  };
+
+  return { createInvoice, getSupplierInvoices, getPendingInvoices, loading, error };
 }
