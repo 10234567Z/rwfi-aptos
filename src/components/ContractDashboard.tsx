@@ -7,12 +7,11 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useState } from "react";
-import { 
-  usePoolStats, 
-  useInvestorInfo, 
-  useCurrentEpoch,
+import {
   useInvestment,
-  useWithdrawal
+  useInvestorInfo,
+  useWithdrawal,
+  useCurrentEpoch,
 } from "@/hooks/useContract";
 import { PoolStats } from "@/components/PoolStats";
 
@@ -23,7 +22,7 @@ export function ContractDashboard() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
   // Contract hooks
-  const { investorInfo, availableReturns, aptBalance, loading: investorLoading, refetch: refetchInvestor } = useInvestorInfo();
+  const { investorInfo, availableReturns, aptBalance, refetch: refetchInvestor } = useInvestorInfo();
   const { currentEpoch, loading: epochLoading, refetch: refetchEpoch } = useCurrentEpoch();
   const { investApt, loading: investLoading } = useInvestment();
   const { withdrawReturns, loading: withdrawLoading } = useWithdrawal();

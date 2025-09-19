@@ -7,6 +7,7 @@ module rwfi_addr::spv {
     use aptos_framework::timestamp;
     use aptos_framework::account;
     use std::vector;
+    use std::string;
 
     // Error codes
     /// Invalid admin signer
@@ -27,30 +28,34 @@ module rwfi_addr::spv {
     const E_NO_RETURNS_AVAILABLE: u64 = 8;
     /// Resource account not initialized
     const E_RESOURCE_ACCOUNT_NOT_INITIALIZED: u64 = 9;
-    /// Risk score too low for funding
-    const E_RISK_SCORE_TOO_LOW: u64 = 10;
-    /// Supplier exposure limit exceeded
-    const E_SUPPLIER_EXPOSURE_EXCEEDED: u64 = 11;
-    /// Industry concentration limit exceeded
-    const E_INDUSTRY_CONCENTRATION_EXCEEDED: u64 = 12;
-    /// Supplier not risk assessed
-    const E_SUPPLIER_NOT_RISK_ASSESSED: u64 = 13;
+    /// KYC not submitted
+    const E_KYC_NOT_SUBMITTED: u64 = 17;
+    /// KYC not approved
+    const E_KYC_NOT_APPROVED: u64 = 18;
+    /// Invalid document hash
+    const E_INVALID_DOCUMENT_HASH: u64 = 19;
+    /// KYC already submitted
+    const E_KYC_ALREADY_SUBMITTED: u64 = 20;
+    /// Supplier not found
+    const ERROR_SUPPLIER_NOT_FOUND: u64 = 21;
     /// Default not found
-    const E_DEFAULT_NOT_FOUND: u64 = 14;
-    /// Income not overdue
-    const E_INCOME_NOT_OVERDUE: u64 = 15;
-    /// Funding limit exceeded
-    const E_FUNDING_LIMIT_EXCEEDED: u64 = 16;
+    const E_DEFAULT_NOT_FOUND: u64 = 22;
 
     // Constants
     const FUNDING_PERCENTAGE: u64 = 90; // Fund 90% of income amount
     
-    // Risk Management Constants
-    const MIN_CREDIT_SCORE: u64 = 600; // Minimum credit score for funding
-    const MAX_RISK_SCORE: u64 = 100; // Maximum risk score (higher = riskier)
-    const GRACE_PERIOD_DAYS: u64 = 7; // Days grace period before default
-    const DEFAULT_THRESHOLD_DAYS: u64 = 30; // Days overdue before marking default
-    const SECONDS_PER_DAY: u64 = 86400; // Seconds in a day
+    // Time constants
+    const SECONDS_PER_DAY: u64 = 86400;
+    const GRACE_PERIOD_DAYS: u64 = 30;
+    const DEFAULT_THRESHOLD_DAYS: u64 = 60;
+    
+    // KYC Constants
+    const KYC_STATUS_NONE: u8 = 0;
+    const KYC_STATUS_PENDING: u8 = 1;
+    const KYC_STATUS_APPROVED: u8 = 2;
+    const KYC_STATUS_REJECTED: u8 = 3;
+    const KYC_LEVEL_BASIC: u8 = 1;
+    const KYC_LEVEL_ENHANCED: u8 = 2;
 
     struct InvestmentPool has key {
         total_apt_invested: u64, // Total APT invested by all investors
@@ -65,9 +70,6 @@ module rwfi_addr::spv {
         total_invested: u64, // Total APT invested
         total_withdrawn: u64, // Total returns withdrawn
         inv_tokens: u64, // INV tokens held (for withdrawal calculation)
-        last_withdrawal: u64, // Timestamp of last withdrawal
-        join_epoch: u64, // When they first invested (epoch ID)
-        last_claim_epoch: u64, // Last epoch they claimed returns from
         investment_timestamp: u64, // Timestamp when they first invested
     }
 
@@ -90,36 +92,6 @@ module rwfi_addr::spv {
     struct FundedIncomeRegistry has key {
         funded_incomes: Table<u64, FundedIncome>,
         funded_count: u64,
-    }
-
-    // Risk Management Structs
-    struct RiskManagement has key {
-        min_credit_score: u64,           // Minimum credit score (300-850 scale)
-        max_single_funding: u64,         // Max APT for single invoice
-        max_supplier_exposure: u64,      // Max total APT per supplier
-        max_industry_concentration: u64, // Max % in single industry (out of 100)
-        risk_reserves: u64,              // APT set aside for defaults
-        enabled: bool,                   // Risk management enabled flag
-    }
-
-    struct SupplierRiskProfile has store, copy, drop {
-        supplier_addr: address,
-        credit_score: u64,               // 300-850 credit score
-        total_funded: u64,               // Total APT funded to this supplier
-        successful_payments: u64,        // Count of successful collections
-        defaults: u64,                   // Count of defaulted payments
-        risk_score: u64,                 // Calculated risk score 0-100
-        business_age_months: u64,        // Age of business in months
-        annual_revenue: u64,             // Annual revenue
-        industry_type: u64,              // Industry category
-        last_updated: u64,               // Last risk assessment timestamp
-        approved_for_funding: bool,      // Whether approved for funding
-    }
-
-    struct RiskRegistry has key {
-        supplier_profiles: Table<address, SupplierRiskProfile>,
-        industry_exposure: Table<u64, u64>, // industry_type -> total_apt_funded
-        total_risk_assessed: u64,
     }
 
     // Default Management Structs
@@ -171,6 +143,18 @@ module rwfi_addr::spv {
         total_epochs: u64,
     }
 
+    // Data structures for KYC admin interface  
+    struct SupplierKYCInfo has copy, drop {
+        supplier_address: address,
+        business_name: string::String,
+        business_license: string::String,
+        tax_id: string::String,
+        status: u8,
+        submitted_at: u64,
+        reviewed_at: u64,
+        reviewed_by: address
+    }
+
     // Initialize the SPV system
     fun init_module(admin: &signer) {
         assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
@@ -196,22 +180,6 @@ module rwfi_addr::spv {
         let funded_registry = FundedIncomeRegistry {
             funded_incomes: table::new(),
             funded_count: 0,
-        };
-
-        // Initialize Risk Management
-        let risk_management = RiskManagement {
-            min_credit_score: MIN_CREDIT_SCORE,
-            max_single_funding: 1000000,     // 1M APT max single funding
-            max_supplier_exposure: 5000000,  // 5M APT max per supplier
-            max_industry_concentration: 25,  // 25% max in single industry
-            risk_reserves: 0,
-            enabled: true,
-        };
-
-        let risk_registry = RiskRegistry {
-            supplier_profiles: table::new(),
-            industry_exposure: table::new(),
-            total_risk_assessed: 0,
         };
 
         // Initialize Default Management
@@ -240,8 +208,6 @@ module rwfi_addr::spv {
         move_to(admin, pool);
         move_to(admin, investor_registry);
         move_to(admin, funded_registry);
-        move_to(admin, risk_management);
-        move_to(admin, risk_registry);
         move_to(admin, default_management);
         move_to(admin, default_registry);
         move_to(admin, epoch_registry);
@@ -251,7 +217,7 @@ module rwfi_addr::spv {
     public entry fun invest_apt(
         investor: &signer,
         amount: u64
-    ) acquires InvestmentPool, InvestorRegistry, EpochRegistry {
+    ) acquires InvestmentPool, InvestorRegistry {
         let investor_addr = signer::address_of(investor);
         
         // Get treasury address from the capability
@@ -269,8 +235,6 @@ module rwfi_addr::spv {
         
         // Update investor registry
         let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
-        let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
-        let current_epoch = epoch_registry.current_epoch;
         let investment_time = timestamp::now_seconds();
         
         if (table::contains(&registry.investors, investor_addr)) {
@@ -282,10 +246,7 @@ module rwfi_addr::spv {
                 total_invested: amount,
                 total_withdrawn: 0,
                 inv_tokens: 0,
-                last_withdrawal: 0,
-                join_epoch: current_epoch, // Record when they joined
-                last_claim_epoch: current_epoch, // Start claiming from current epoch
-                investment_timestamp: investment_time, // Critical: when they invested
+                investment_timestamp: investment_time, // When they invested
             });
             registry.total_investors = registry.total_investors + 1;
         };
@@ -298,99 +259,79 @@ module rwfi_addr::spv {
         investor_data.inv_tokens = investor_data.inv_tokens + amount;
     }
 
-    // Submit supplier for risk assessment
-    public entry fun submit_risk_assessment(
+    // Submit KYC documents (supplier uploads document hashes)
+    public entry fun submit_kyc_documents(
         supplier: &signer,
-        credit_score: u64,
-        business_age_months: u64,
-        annual_revenue: u64,
-        industry_type: u64
-    ) acquires RiskRegistry, RiskManagement {
+        document_hashes: vector<vector<u8>>,
+        kyc_level: u8
+    ) acquires RiskRegistry {
         let supplier_addr = signer::address_of(supplier);
         
         // Validate inputs
-        assert!(credit_score >= 300 && credit_score <= 850, E_INVALID_WITHDRAWAL_AMOUNT); // Reusing error for validation
-        assert!(business_age_months > 0, E_INVALID_WITHDRAWAL_AMOUNT);
-        assert!(annual_revenue > 0, E_INVALID_WITHDRAWAL_AMOUNT);
-        assert!(industry_type >= 1 && industry_type <= 5, E_INVALID_WITHDRAWAL_AMOUNT); // Match invoice registry types
+        assert!(kyc_level == KYC_LEVEL_BASIC || kyc_level == KYC_LEVEL_ENHANCED, E_INVALID_WITHDRAWAL_AMOUNT);
+        assert!(vector::length(&document_hashes) > 0, E_INVALID_DOCUMENT_HASH);
         
-        let risk_mgmt = borrow_global<RiskManagement>(@rwfi_addr);
-        assert!(risk_mgmt.enabled, E_INVALID_WITHDRAWAL_AMOUNT);
-        
-        // Calculate risk score (simple algorithm for demo)
-        let risk_score = calculate_risk_score_internal(credit_score, business_age_months, annual_revenue);
-        let approved = credit_score >= risk_mgmt.min_credit_score && risk_score <= 70; // Risk score <= 70 is acceptable
-        
-        // Create or update supplier risk profile
         let registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
-        let profile = SupplierRiskProfile {
-            supplier_addr,
-            credit_score,
-            total_funded: 0, // Will be updated when funding occurs
-            successful_payments: 0,
-            defaults: 0,
-            risk_score,
-            business_age_months,
-            annual_revenue,
-            industry_type,
-            last_updated: timestamp::now_seconds(),
-            approved_for_funding: approved,
+        
+        // Create or update supplier profile for KYC
+        if (!table::contains(&registry.supplier_profiles, supplier_addr)) {
+            // Create new profile with minimal data for KYC-only flow
+            let profile = SupplierRiskProfile {
+                supplier_addr,
+                credit_score: 0, // Not required for KYC
+                total_funded: 0,
+                successful_payments: 0,
+                defaults: 0,
+                risk_score: 0, // Not required for KYC
+                business_age_months: 0, // Not required for KYC
+                annual_revenue: 0, // Not required for KYC
+                industry_type: 1, // Default value
+                last_updated: timestamp::now_seconds(),
+                approved_for_funding: false, // Will be determined by KYC approval
+                // Initialize KYC fields
+                kyc_status: KYC_STATUS_NONE,
+                kyc_submission_timestamp: 0,
+                kyc_approval_timestamp: 0,
+                document_hashes: vector::empty(),
+                kyc_level: KYC_LEVEL_BASIC,
+            };
+            table::upsert(&mut registry.supplier_profiles, supplier_addr, profile);
         };
         
-        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
-            // Update existing profile but preserve funding history
-            let existing = table::borrow_mut(&mut registry.supplier_profiles, supplier_addr);
-            existing.credit_score = credit_score;
-            existing.risk_score = risk_score;
-            existing.business_age_months = business_age_months;
-            existing.annual_revenue = annual_revenue;
-            existing.industry_type = industry_type;
-            existing.last_updated = timestamp::now_seconds();
-            existing.approved_for_funding = approved;
-        } else {
-            table::upsert(&mut registry.supplier_profiles, supplier_addr, profile);
-            registry.total_risk_assessed = registry.total_risk_assessed + 1;
-        };
+        let profile = table::borrow_mut(&mut registry.supplier_profiles, supplier_addr);
+        assert!(profile.kyc_status == KYC_STATUS_NONE || profile.kyc_status == KYC_STATUS_REJECTED, E_KYC_ALREADY_SUBMITTED);
+        
+        // Update KYC information
+        profile.kyc_status = KYC_STATUS_PENDING;
+        profile.kyc_submission_timestamp = timestamp::now_seconds();
+        profile.document_hashes = document_hashes;
+        profile.kyc_level = kyc_level;
+        profile.approved_for_funding = false; // Reset approval until KYC approved
     }
 
-    // Calculate risk score based on credit score, business age, and revenue
-    fun calculate_risk_score_internal(credit_score: u64, business_age_months: u64, annual_revenue: u64): u64 {
-        let score = 0;
+    // Admin approves or rejects KYC
+    public entry fun process_kyc_application(
+        admin: &signer,
+        supplier_addr: address,
+        approve: bool
+    ) acquires RiskRegistry {
+        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         
-        // Credit score component (0-40 points, lower credit = higher risk)
-        if (credit_score >= 750) {
-            score = score + 10; // Low risk
-        } else if (credit_score >= 700) {
-            score = score + 20;
-        } else if (credit_score >= 650) {
-            score = score + 30;
-        } else {
-            score = score + 40; // High risk
+        let registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
+        assert!(table::contains(&registry.supplier_profiles, supplier_addr), ERROR_SUPPLIER_NOT_FOUND);
+        
+        let profile = table::borrow_mut(&mut registry.supplier_profiles, supplier_addr);
+        assert!(profile.kyc_status == KYC_STATUS_PENDING, E_KYC_NOT_SUBMITTED);
+        
+        // Update KYC status
+        profile.kyc_status = if (approve) { KYC_STATUS_APPROVED } else { KYC_STATUS_REJECTED };
+        profile.kyc_approval_timestamp = timestamp::now_seconds();
+        
+        // If approved, enable for funding
+        if (approve) {
+            profile.approved_for_funding = true;
         };
-        
-        // Business age component (0-30 points)
-        if (business_age_months >= 60) { // 5+ years
-            score = score + 5;
-        } else if (business_age_months >= 36) { // 3+ years
-            score = score + 15;
-        } else if (business_age_months >= 12) { // 1+ year
-            score = score + 25;
-        } else {
-            score = score + 30; // Less than 1 year = high risk
-        };
-        
-        // Revenue component (0-30 points)
-        if (annual_revenue >= 1000000) { // 1M+ revenue
-            score = score + 5;
-        } else if (annual_revenue >= 500000) {
-            score = score + 15;
-        } else if (annual_revenue >= 100000) {
-            score = score + 25;
-        } else {
-            score = score + 30; // Low revenue = high risk
-        };
-        
-        score
+        profile.approved_for_funding = approve; // Only allow funding if KYC approved
     }
 
     // Admin funds an accrued income (90% of amount)
@@ -433,93 +374,6 @@ module rwfi_addr::spv {
         };
         
         table::upsert(&mut funded_registry.funded_incomes, funded_registry.funded_count, funded_income);
-        
-        // Mark income as funded in registry
-        accrued_income_registry::mark_income_funded(supplier_addr, income_id, funding_amount);
-    }
-
-    // Enhanced funding with risk assessment checks
-    public entry fun fund_accrued_income_with_risk_check(
-        admin: &signer,
-        supplier_addr: address,
-        income_id: u64
-    ) acquires InvestmentPool, FundedIncomeRegistry, RiskManagement, RiskRegistry {
-        assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
-        
-        let risk_mgmt = borrow_global<RiskManagement>(@rwfi_addr);
-        assert!(risk_mgmt.enabled, E_INVALID_WITHDRAWAL_AMOUNT);
-        
-        // Check if supplier has been risk assessed
-        let risk_registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        assert!(table::contains(&risk_registry.supplier_profiles, supplier_addr), E_SUPPLIER_NOT_RISK_ASSESSED);
-        
-        let supplier_profile = table::borrow(&risk_registry.supplier_profiles, supplier_addr);
-        assert!(supplier_profile.approved_for_funding, E_RISK_SCORE_TOO_LOW);
-        
-        // Get income details
-        let income = accrued_income_registry::get_income(supplier_addr, income_id);
-        let funding_amount = (accrued_income_registry::get_income_amount(&income) * FUNDING_PERCENTAGE) / 100;
-        
-        // Risk checks
-        assert!(funding_amount <= risk_mgmt.max_single_funding, E_FUNDING_LIMIT_EXCEEDED);
-        assert!(supplier_profile.total_funded + funding_amount <= risk_mgmt.max_supplier_exposure, E_SUPPLIER_EXPOSURE_EXCEEDED);
-        
-        // Check industry concentration
-        let industry_type = accrued_income_registry::get_income_type(&income);
-        let current_industry_exposure = if (table::contains(&risk_registry.industry_exposure, industry_type)) {
-            *table::borrow(&risk_registry.industry_exposure, industry_type)
-        } else {
-            0
-        };
-        
-        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
-        let total_pool = pool.total_apt_invested;
-        if (total_pool > 0) {
-            let new_exposure_pct = ((current_industry_exposure + funding_amount) * 100) / total_pool;
-            assert!(new_exposure_pct <= risk_mgmt.max_industry_concentration, E_INDUSTRY_CONCENTRATION_EXCEEDED);
-        };
-        
-        // All risk checks passed, proceed with funding using original logic
-        assert!(pool.available_for_funding >= funding_amount, E_INSUFFICIENT_FUNDS);
-        
-        // Transfer APT to supplier from treasury account
-        let pool_mut = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        let treasury_signer = account::create_signer_with_capability(&pool_mut.treasury_cap);
-        aptos_account::transfer(&treasury_signer, supplier_addr, funding_amount);
-        
-        // Update pool
-        pool_mut.available_for_funding = pool_mut.available_for_funding - funding_amount;
-        pool_mut.total_funded_incomes = pool_mut.total_funded_incomes + 1;
-        
-        // Record funded income
-        let funded_registry = borrow_global_mut<FundedIncomeRegistry>(@rwfi_addr);
-        funded_registry.funded_count = funded_registry.funded_count + 1;
-        
-        let funded_income = FundedIncome {
-            supplier_addr,
-            income_id,
-            funded_amount: funding_amount,
-            expected_collection: accrued_income_registry::get_income_amount(&income),
-            funded_at: timestamp::now_seconds(),
-            collected: false,
-            collected_at: 0,
-            collected_amount: 0,
-        };
-        
-        table::upsert(&mut funded_registry.funded_incomes, funded_registry.funded_count, funded_income);
-        
-        // Update risk tracking
-        let risk_registry_mut = borrow_global_mut<RiskRegistry>(@rwfi_addr);
-        let supplier_profile_mut = table::borrow_mut(&mut risk_registry_mut.supplier_profiles, supplier_addr);
-        supplier_profile_mut.total_funded = supplier_profile_mut.total_funded + funding_amount;
-        
-        // Update industry exposure
-        if (table::contains(&risk_registry_mut.industry_exposure, industry_type)) {
-            let current = table::borrow_mut(&mut risk_registry_mut.industry_exposure, industry_type);
-            *current = *current + funding_amount;
-        } else {
-            table::upsert(&mut risk_registry_mut.industry_exposure, industry_type, funding_amount);
-        };
         
         // Mark income as funded in registry
         accrued_income_registry::mark_income_funded(supplier_addr, income_id, funding_amount);
@@ -787,48 +641,7 @@ module rwfi_addr::spv {
         defaulted_income.recovery_status = 4; // Written Off
     }
 
-    // Investors withdraw their share of returns
-    public entry fun withdraw_returns(
-        investor: &signer,
-        inv_tokens_to_redeem: u64
-    ) acquires InvestmentPool, InvestorRegistry {
-        let investor_addr = signer::address_of(investor);
-        
-        let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
-        assert!(table::contains(&registry.investors, investor_addr), E_NO_INV_TOKENS);
-        
-        let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
-        assert!(investor_data.inv_tokens >= inv_tokens_to_redeem, E_INVALID_WITHDRAWAL_AMOUNT);
-        
-        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
-        assert!(pool.total_collections > 0, E_NO_RETURNS_AVAILABLE);
-        
-        // Calculate withdrawal amount based on INV tokens
-        // Formula: (inv_tokens_to_redeem / total_inv_supply) * total_collections
-        let total_inv_supply = invoice_coin::get_total_supply();
-        let withdrawal_amount = (inv_tokens_to_redeem * pool.total_collections) / total_inv_supply;
-        
-        assert!(withdrawal_amount > 0, E_INVALID_WITHDRAWAL_AMOUNT);
-        
-        // Burn INV tokens
-        invoice_coin::burn_from_primary_store(@rwfi_addr, investor_addr, inv_tokens_to_redeem);
-        
-        // Transfer APT to investor from treasury account
-        let treasury_signer = account::create_signer_with_capability(&pool.treasury_cap);
-        aptos_account::transfer(&treasury_signer, investor_addr, withdrawal_amount);
-        
-        // Update pool to reflect withdrawal
-        let pool_mut = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        assert!(pool_mut.total_collections >= withdrawal_amount, E_INSUFFICIENT_FUNDS);
-        pool_mut.total_collections = pool_mut.total_collections - withdrawal_amount;
-        
-        // Update investor data
-        investor_data.inv_tokens = investor_data.inv_tokens - inv_tokens_to_redeem;
-        investor_data.total_withdrawn = investor_data.total_withdrawn + withdrawal_amount;
-        investor_data.last_withdrawal = timestamp::now_seconds();
-    }
-
-    // New timestamp-based withdrawal system - only returns from invoices funded AFTER investment
+    // Timestamp-based withdrawal system - only returns from invoices funded AFTER investment
     public entry fun withdraw_returns_timestamp_based(
         investor: &signer,
         inv_tokens_to_redeem: u64
@@ -891,7 +704,6 @@ module rwfi_addr::spv {
         // Update investor data
         investor_data.inv_tokens = investor_data.inv_tokens - inv_tokens_to_redeem;
         investor_data.total_withdrawn = investor_data.total_withdrawn + final_withdrawal_amount;
-        investor_data.last_withdrawal = timestamp::now_seconds();
     }
 
     // Calculate returns based on timestamp - only from invoices funded AFTER investment
@@ -946,13 +758,13 @@ module rwfi_addr::spv {
     }
 
     #[view]
-    public fun get_investor_info(investor_addr: address): (bool, u64, u64, u64, u64, u64) acquires InvestorRegistry {
+    public fun get_investor_info(investor_addr: address): (bool, u64, u64, u64, u64) acquires InvestorRegistry {
         let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         if (table::contains(&registry.investors, investor_addr)) {
             let investor = table::borrow(&registry.investors, investor_addr);
-            (true, investor.total_invested, investor.total_withdrawn, investor.inv_tokens, investor.last_withdrawal, investor.investment_timestamp)
+            (true, investor.total_invested, investor.total_withdrawn, investor.inv_tokens, investor.investment_timestamp)
         } else {
-            (false, 0, 0, 0, 0, 0)
+            (false, 0, 0, 0, 0)
         }
     }
 
@@ -1002,34 +814,103 @@ module rwfi_addr::spv {
                 industry_type: 0,
                 last_updated: 0,
                 approved_for_funding: false,
+                kyc_status: KYC_STATUS_NONE,
+                kyc_submission_timestamp: 0,
+                kyc_approval_timestamp: 0,
+                document_hashes: vector::empty(),
+                kyc_level: KYC_LEVEL_BASIC,
             })
         }
     }
 
+    // DEPRECATED: Risk management view function kept for backward compatibility
     #[view]
-    public fun calculate_risk_score(credit_score: u64, business_age_months: u64, annual_revenue: u64): u64 {
-        calculate_risk_score_internal(credit_score, business_age_months, annual_revenue)
-    }
-
-    #[view]
-    public fun get_risk_management_config(): (u64, u64, u64, u64, bool) acquires RiskManagement {
+    public fun get_simplified_risk_config(): (u64, bool) acquires RiskManagement {
         let risk_mgmt = borrow_global<RiskManagement>(@rwfi_addr);
-        (
-            risk_mgmt.min_credit_score,
-            risk_mgmt.max_single_funding,
-            risk_mgmt.max_supplier_exposure,
-            risk_mgmt.max_industry_concentration,
-            risk_mgmt.enabled
-        )
+        (risk_mgmt.min_credit_score, risk_mgmt.enabled)
+    }
+
+    // KYC View Functions
+    #[view] 
+    public fun get_all_pending_kyc_suppliers(): vector<SupplierKYCInfo> acquires RiskRegistry {
+        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
+        let pending_suppliers = vector::empty<SupplierKYCInfo>();
+        
+        // Note: Since Move doesn't support table iteration directly, 
+        // this returns an empty vector. In practice, you'd maintain a separate
+        // vector of supplier addresses for iteration
+        pending_suppliers
     }
 
     #[view]
-    public fun get_industry_exposure(industry_type: u64): u64 acquires RiskRegistry {
+    public fun get_supplier_kyc_details(supplier_addr: address): SupplierKYCInfo acquires RiskRegistry {
         let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&registry.industry_exposure, industry_type)) {
-            *table::borrow(&registry.industry_exposure, industry_type)
+        assert!(table::contains(&registry.supplier_profiles, supplier_addr), ERROR_SUPPLIER_NOT_FOUND);
+        
+        let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
+        SupplierKYCInfo {
+            supplier_address: supplier_addr,
+            business_name: string::utf8(b"Business Name"), // Placeholder - would be stored in profile
+            business_license: string::utf8(b"License123"), // Placeholder - would be stored in profile  
+            tax_id: string::utf8(b"TAX123"), // Placeholder - would be stored in profile
+            status: profile.kyc_status,
+            submitted_at: profile.kyc_submission_timestamp,
+            reviewed_at: profile.kyc_approval_timestamp,
+            reviewed_by: @rwfi_addr // Simplified for now
+        }
+    }
+
+    #[view]
+    public fun get_kyc_stats(): (u64, u64, u64, u64) acquires RiskRegistry {
+        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
+        
+        // Note: Since Move doesn't support table iteration directly,
+        // this returns simplified stats. In practice, you'd maintain counters
+        // or a separate data structure for tracking stats
+        (0, 0, 0, 0) // (total, pending, approved, rejected)
+    }
+
+    // Check if supplier has submitted KYC
+    #[view]
+    public fun check_supplier_kyc_status(supplier_addr: address): (bool, u8, u64, u64) acquires RiskRegistry {
+        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
+        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
+            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
+            (true, profile.kyc_status, profile.kyc_submission_timestamp, profile.kyc_approval_timestamp)
         } else {
-            0
+            (false, KYC_STATUS_NONE, 0, 0)
+        }
+    }
+    #[view]
+    public fun get_kyc_status(supplier_addr: address): u8 acquires RiskRegistry {
+        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
+        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
+            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
+            profile.kyc_status
+        } else {
+            KYC_STATUS_NONE
+        }
+    }
+
+    #[view]
+    public fun is_kyc_approved(supplier_addr: address): bool acquires RiskRegistry {
+        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
+        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
+            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
+            profile.kyc_status == KYC_STATUS_APPROVED
+        } else {
+            false
+        }
+    }
+
+    #[view]
+    public fun get_document_hashes(supplier_addr: address): vector<vector<u8>> acquires RiskRegistry {
+        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
+        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
+            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
+            profile.document_hashes
+        } else {
+            vector::empty()
         }
     }
 
@@ -1102,18 +983,6 @@ module rwfi_addr::spv {
     }
 
     #[view]
-    public fun get_investor_epoch_info(investor_addr: address): (u64, u64) acquires InvestorRegistry {
-        let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
-        
-        if (table::contains(&registry.investors, investor_addr)) {
-            let investor_data = table::borrow(&registry.investors, investor_addr);
-            (investor_data.join_epoch, investor_data.last_claim_epoch)
-        } else {
-            (0, 0)
-        }
-    }
-
-    #[view]
     public fun calculate_available_returns_for_investor(investor_addr: address): u64 acquires InvestorRegistry, EpochRegistry {
         let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         
@@ -1169,6 +1038,6 @@ module rwfi_addr::spv {
     #[view]
     public fun get_risk_registry_stats(): (u64, u64) acquires RiskRegistry {
         let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        (registry.total_risk_assessed, 0) // Second value reserved for future use
+        (0, 0) // Simplified return - in practice would count supplier_profiles table size
     }
 }

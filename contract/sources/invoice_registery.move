@@ -71,16 +71,15 @@ module rwfi_addr::accrued_income_registry {
         assert!(amount > 0, E_INVALID_AMOUNT);
         let supplier_addr = signer::address_of(supplier);
 
-        // Initialize registry if it doesn't exist
-        if (!exists<IncomeRegistry>(supplier_addr)) {
-            move_to(supplier, IncomeRegistry {
-                incomes: table::new(),
-                income_count: 0,
-                total_funded: 0,
-                total_collected: 0,
-            });
+        // Check if registry exists and get next income ID
+        let (next_income_id, registry_exists) = if (exists<IncomeRegistry>(supplier_addr)) {
+            let existing_registry = borrow_global<IncomeRegistry>(supplier_addr);
+            (existing_registry.income_count + 1, true)
+        } else {
+            (1, false)
         };
 
+        // Create income object first
         let income = AccruedIncome {
             supplier_addr,
             amount,
@@ -98,9 +97,23 @@ module rwfi_addr::accrued_income_registry {
             spv_owned: false,
         };
 
-        let registry = borrow_global_mut<IncomeRegistry>(supplier_addr);
-        registry.income_count = registry.income_count + 1;
-        table::upsert(&mut registry.incomes, registry.income_count, income);
+        // Handle registry creation or update separately
+        if (!registry_exists) {
+            // Create new registry with the income
+            let new_table = table::new();
+            table::add(&mut new_table, next_income_id, income);
+            move_to(supplier, IncomeRegistry {
+                incomes: new_table,
+                income_count: next_income_id,
+                total_funded: 0,
+                total_collected: 0,
+            });
+        } else {
+            // Update existing registry
+            let registry = borrow_global_mut<IncomeRegistry>(supplier_addr);
+            registry.income_count = next_income_id;
+            table::add(&mut registry.incomes, next_income_id, income);
+        };
     }
 
     // Mark income as funded by SPV

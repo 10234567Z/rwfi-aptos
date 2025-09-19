@@ -1,11 +1,13 @@
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
 
-export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0x53095ac83890c3dbdc58b3b7b17b719f24d9a9a9e81dd82fa5e535d841b3362d";
+export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0xa93465b6d4aa9f0cc3def35d476a6c259ec46320de0377c331c20519aa4eca95";
 export const APTOS_NETWORK = Network.DEVNET;
 
 // Debug log to check if CONTRACT_ADDRESS is properly loaded
 if (typeof window !== 'undefined') {
-  console.log("CONTRACT_ADDRESS:", CONTRACT_ADDRESS);
+  console.log("CLIENT CONTRACT_ADDRESS:", CONTRACT_ADDRESS);
+  console.log("ENV CONTRACT_ADDRESS:", process.env.NEXT_PUBLIC_CONTRACT_ADDRESS);
+  console.log("APTOS_API_KEY:", process.env.NEXT_PUBLIC_APTOS_API_KEY ? "✅ Loaded" : "❌ Missing");
 }
 
 const config = new AptosConfig({
@@ -47,6 +49,20 @@ export const INCOME_STATUS = {
   CANCELLED: 4,
 } as const;
 
+// KYC Status Constants
+export const KYC_STATUS = {
+  NONE: 0,
+  PENDING: 1,
+  APPROVED: 2,
+  REJECTED: 3,
+} as const;
+
+// KYC Level Constants
+export const KYC_LEVEL = {
+  BASIC: 1,
+  ENHANCED: 2,
+} as const;
+
 // Contract function names
 export const CONTRACT_FUNCTIONS = {
   // Investment functions
@@ -64,13 +80,23 @@ export const CONTRACT_FUNCTIONS = {
   CALCULATE_WITHDRAWAL_AMOUNT_TIMESTAMP_BASED: `${CONTRACT_ADDRESS}::spv::calculate_withdrawal_amount_timestamp_based`, // New function
   CALCULATE_TOTAL_WITHDRAWABLE: `${CONTRACT_ADDRESS}::spv::calculate_withdrawal_amount_timestamp_based`, // Alias for compatibility
   
-  // Risk management functions
+  // DEPRECATED Risk management functions (kept for backward compatibility)
   SUBMIT_RISK_ASSESSMENT: `${CONTRACT_ADDRESS}::spv::submit_risk_assessment`,
   GET_SUPPLIER_RISK_PROFILE: `${CONTRACT_ADDRESS}::spv::get_supplier_risk_profile`,
-  CALCULATE_RISK_SCORE: `${CONTRACT_ADDRESS}::spv::calculate_risk_score`,
-  GET_RISK_MANAGEMENT_CONFIG: `${CONTRACT_ADDRESS}::spv::get_risk_management_config`,
   
-  // Invoice management functions
+  // KYC functions
+  SUBMIT_KYC_DOCUMENTS: `${CONTRACT_ADDRESS}::spv::submit_kyc_documents`,
+  PROCESS_KYC_APPLICATION: `${CONTRACT_ADDRESS}::spv::process_kyc_application`,
+  GET_KYC_STATUS: `${CONTRACT_ADDRESS}::spv::get_kyc_status`,
+  IS_KYC_APPROVED: `${CONTRACT_ADDRESS}::spv::is_kyc_approved`,
+  GET_DOCUMENT_HASHES: `${CONTRACT_ADDRESS}::spv::get_document_hashes`,
+  
+  // KYC Admin View functions  
+  GET_ALL_PENDING_KYC_SUPPLIERS: `${CONTRACT_ADDRESS}::spv::get_all_pending_kyc_suppliers`,
+  GET_SUPPLIER_KYC_DETAILS: `${CONTRACT_ADDRESS}::spv::get_supplier_kyc_details`,
+  GET_KYC_STATS: `${CONTRACT_ADDRESS}::spv::get_kyc_stats`,
+  
+  // Accrued income management functions (updated terminology)
   CREATE_ACCRUED_INCOME: `${CONTRACT_ADDRESS}::accrued_income_registry::create_accrued_income`,
   GET_INCOME: `${CONTRACT_ADDRESS}::accrued_income_registry::get_income`,
   GET_ALL_INCOMES: `${CONTRACT_ADDRESS}::accrued_income_registry::get_all_incomes`,

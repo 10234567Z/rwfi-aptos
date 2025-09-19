@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
@@ -21,8 +21,8 @@ interface Invoice {
 
 export function InvoiceManagement() {
   const { account } = useWallet();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [invoices] = useState<Invoice[]>([]);
+  const [loading] = useState(false);
 
   const getStatusColor = (status: number) => {
     switch (status) {
@@ -83,55 +83,6 @@ export function InvoiceManagement() {
       return { name: payerInfo };
     }
   };
-
-  // Mock data for demonstration - in real implementation, this would fetch from the contract
-  const mockInvoices: Invoice[] = [
-    {
-      id: "1",
-      amount: "500000000000", // 5000 APT in octas
-      due_date: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60), // 30 days from now
-      income_type: INCOME_TYPES.BUSINESS_INVOICE,
-      payer_info: JSON.stringify({ name: "Tech Corp Ltd", email: "payments@techcorp.com" }),
-      payer_contact: "payments@techcorp.com",
-      description: "Website development project final payment",
-      status: INCOME_STATUS.FUNDED,
-      created_at: Math.floor(Date.now() / 1000) - (5 * 24 * 60 * 60), // 5 days ago
-      funded_amount: "450000000000" // 4500 APT (90%)
-    },
-    {
-      id: "2", 
-      amount: "200000000000", // 2000 APT in octas
-      due_date: Math.floor(Date.now() / 1000) + (15 * 24 * 60 * 60), // 15 days from now
-      income_type: INCOME_TYPES.FREELANCE,
-      payer_info: JSON.stringify({ name: "Digital Agency", email: "finance@digitalagency.com", phone: "+1-555-0123" }),
-      payer_contact: "finance@digitalagency.com",
-      description: "Mobile app UI/UX design services",
-      status: INCOME_STATUS.PENDING,
-      created_at: Math.floor(Date.now() / 1000) - (2 * 24 * 60 * 60) // 2 days ago
-    },
-    {
-      id: "3",
-      amount: "800000000000", // 8000 APT in octas  
-      due_date: Math.floor(Date.now() / 1000) + (45 * 24 * 60 * 60), // 45 days from now
-      income_type: INCOME_TYPES.BUSINESS_INVOICE,
-      payer_info: JSON.stringify({ name: "Enterprise Solutions Inc", email: "ap@enterprise.com" }),
-      payer_contact: "ap@enterprise.com", 
-      description: "Q4 consulting services",
-      status: INCOME_STATUS.PENDING, // Changed from APPROVED to PENDING
-      created_at: Math.floor(Date.now() / 1000) - (1 * 24 * 60 * 60) // 1 day ago
-    }
-  ];
-
-  useEffect(() => {
-    if (account) {
-      setLoading(true);
-      // Simulate API call delay
-      setTimeout(() => {
-        setInvoices(mockInvoices);
-        setLoading(false);
-      }, 1000);
-    }
-  }, [account]);
 
   if (!account) {
     return (

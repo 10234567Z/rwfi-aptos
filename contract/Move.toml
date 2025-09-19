@@ -1,10 +1,10 @@
 [package]
-name = "Invoice Registry"
-version = "1.0.0"
+name = "RWAfi Accrued Income Registry"
+version = "2.0.0"
 authors = []
 
 [addresses]
-rwfi_addr = "0x53095ac83890c3dbdc58b3b7b17b719f24d9a9a9e81dd82fa5e535d841b3362d"
+rwfi_addr = "0x86844c7c4eeab4db909f2b5a3b84aedb2870eb7cb657eba2cdedce8cf919b711"
 
 [dev-addresses]
 rwfi_addr = "0x71383a56eb24011c2c1e086128306036cbb83e98d780ed2ee596def61c15e6cd"

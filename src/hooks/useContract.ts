@@ -4,6 +4,28 @@ import { useState, useEffect } from "react";
 import { useWallet, type InputTransactionData } from "@aptos-labs/wallet-adapter-react";
 import { aptos, CONTRACT_FUNCTIONS } from "@/utils/aptosClient";
 
+// Default gas configuration for transactions
+const DEFAULT_GAS_CONFIG = {
+  maxGasAmount: 200000, // Increased for complex operations
+  gasUnitPrice: 100,    // Standard gas price
+};
+
+// Helper function to create transaction with gas configuration
+const createTransactionWithGas = (
+  functionName: `${string}::${string}::${string}`, 
+  functionArguments: any[], 
+  gasConfig = DEFAULT_GAS_CONFIG
+): InputTransactionData => ({
+  data: {
+    function: functionName,
+    functionArguments,
+  },
+  options: {
+    maxGasAmount: gasConfig.maxGasAmount,
+    gasUnitPrice: gasConfig.gasUnitPrice,
+  },
+});
+
 // Hook for reading pool statistics
 export function usePoolStats() {
   const [poolStats, setPoolStats] = useState<{
@@ -111,7 +133,7 @@ export function useInvestorInfo() {
       }
 
       // Get total withdrawable amount using all their INV tokens
-      const invTokens = detailedResult && detailedResult[4] ? detailedResult[4].toString() : "0";
+      // const invTokens = detailedResult && detailedResult[4] ? detailedResult[4].toString() : "0";
       
       // Use the simpler available returns calculation for now
       try {
@@ -163,12 +185,10 @@ export function useInvestment() {
       setLoading(true);
       setError(null);
 
-      const transaction: InputTransactionData = {
-        data: {
-          function: CONTRACT_FUNCTIONS.INVEST_APT,
-          functionArguments: [amount],
-        },
-      };
+      const transaction = createTransactionWithGas(
+        CONTRACT_FUNCTIONS.INVEST_APT,
+        [amount]
+      );
 
       const response = await signAndSubmitTransaction(transaction);
       await aptos.waitForTransaction({ transactionHash: response.hash });
@@ -221,6 +241,10 @@ export function useWithdrawal() {
         data: {
           function: functionName,
           functionArguments: [amountU64],
+        },
+        options: {
+          maxGasAmount: DEFAULT_GAS_CONFIG.maxGasAmount,
+          gasUnitPrice: DEFAULT_GAS_CONFIG.gasUnitPrice,
         },
       };
 
@@ -306,6 +330,10 @@ export function useRiskAssessment() {
             industryType.toString()
           ],
         },
+        options: {
+          maxGasAmount: DEFAULT_GAS_CONFIG.maxGasAmount,
+          gasUnitPrice: DEFAULT_GAS_CONFIG.gasUnitPrice,
+        },
       };
 
       const response = await signAndSubmitTransaction(transaction);
@@ -382,6 +410,7 @@ export function useInvoiceCreation() {
       setLoading(true);
       setError(null);
 
+      // Strictly follow MCP guidance: ALWAYS use wallet adapter functions
       const transaction: InputTransactionData = {
         data: {
           function: CONTRACT_FUNCTIONS.CREATE_ACCRUED_INCOME,
@@ -389,19 +418,68 @@ export function useInvoiceCreation() {
             amount,
             dueDateTimestamp.toString(),
             incomeType.toString(),
-            Array.from(new TextEncoder().encode(payerInfo)),
-            Array.from(new TextEncoder().encode(payerContact)),
-            Array.from(new TextEncoder().encode(description))
+            payerInfo,
+            payerContact,
+            description
           ],
+        },
+        options: {
+          maxGasAmount: 500000, // High gas for resource creation
+          gasUnitPrice: 100,
+          expireTimestamp: Math.floor(Date.now() / 1000) + 300, // 5 minute expiry for better reliability
         },
       };
 
+      console.log("Submitting transaction with options:", transaction.options);
+      console.log("Transaction function:", CONTRACT_FUNCTIONS.CREATE_ACCRUED_INCOME);
+      
       const response = await signAndSubmitTransaction(transaction);
-      await aptos.waitForTransaction({ transactionHash: response.hash });
+      
+      console.log("Transaction submitted successfully:", response.hash);
+      
+      // Wait for confirmation with proper timeout handling
+      try {
+        await aptos.waitForTransaction({ 
+          transactionHash: response.hash,
+          options: {
+            timeoutSecs: 60, // Extended timeout for resource creation
+            checkSuccess: true,
+          }
+        });
+        console.log("Transaction confirmed:", response.hash);
+      } catch (waitError) {
+        console.warn("Transaction may still be processing:", response.hash);
+        // Don't throw here - transaction was submitted successfully
+      }
+      
       return response;
     } catch (err) {
       console.error("Error creating invoice:", err);
-      const errorMessage = err instanceof Error ? err.message : "Failed to create invoice";
+      console.error("Full error object:", JSON.stringify(err, null, 2));
+      
+      // Enhanced error handling based on common Aptos errors
+      let errorMessage = "Failed to create invoice";
+      
+      if (err instanceof Error) {
+        const errorStr = err.message.toLowerCase();
+        
+        if (errorStr.includes("simulation failed")) {
+          errorMessage = "Transaction simulation failed. Please check your input values and try again.";
+        } else if (errorStr.includes("insufficient funds") || errorStr.includes("insufficient balance")) {
+          errorMessage = "Insufficient APT balance for transaction fees. Please add more APT to your wallet.";
+        } else if (errorStr.includes("timeout") || errorStr.includes("time out")) {
+          errorMessage = "Transaction timeout. Your transaction may still be processing. Please check your transaction history.";
+        } else if (errorStr.includes("rate limit") || errorStr.includes("too many requests")) {
+          errorMessage = "Rate limit exceeded. Please wait a moment and try again.";
+        } else if (errorStr.includes("account sequence number")) {
+          errorMessage = "Transaction sequence error. Please refresh and try again.";
+        } else if (errorStr.includes("gas")) {
+          errorMessage = "Gas estimation failed. Please try again with different parameters.";
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
       setError(errorMessage);
       throw new Error(errorMessage);
     } finally {

@@ -1,23 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useInvoiceCreation } from "@/hooks/useContract";
-import { INCOME_TYPES } from "@/utils/aptosClient";
+import { useKYC } from "@/hooks/useKYC";
+import { INCOME_TYPES, KYC_STATUS } from "@/utils/aptosClient";
 
-interface InvoiceCreationFormProps {
-  onInvoiceCreated?: () => void;
+interface CleanIncomeFormProps {
+  onIncomeCreated?: () => void;
 }
 
-export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormProps) {
+export function CleanIncomeForm({ onIncomeCreated }: CleanIncomeFormProps) {
   const { account } = useWallet();
   const { toast } = useToast();
   const { createInvoice, loading } = useInvoiceCreation();
+  const { kycStatus } = useKYC();
 
   const [formData, setFormData] = useState({
     amount: "",
@@ -39,7 +40,16 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
     if (!account) {
       toast({
         title: "Wallet Not Connected",
-        description: "Please connect your wallet to create an invoice",
+        description: "Please connect your wallet to create accrued income",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (kycStatus !== KYC_STATUS.APPROVED) {
+      toast({
+        title: "KYC Verification Required",
+        description: "Please complete and get approved for KYC verification before creating accrued income",
         variant: "destructive",
       });
       return;
@@ -53,7 +63,7 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
     if (amount <= 0) {
       toast({
         title: "Invalid Amount",
-        description: "Invoice amount must be greater than 0",
+        description: "Accrued income amount must be greater than 0",
         variant: "destructive",
       });
       return;
@@ -80,7 +90,7 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
     if (!formData.description.trim()) {
       toast({
         title: "Missing Description",
-        description: "Invoice description is required",
+        description: "Income description is required",
         variant: "destructive",
       });
       return;
@@ -98,6 +108,12 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
 
       const payerContact = formData.payerEmail || formData.payerPhone || "No contact provided";
 
+      // Show initial loading toast
+      toast({
+        title: "Creating Income Record",
+        description: "Please confirm the transaction in your wallet...",
+      });
+
       await createInvoice(
         amountInOctas,
         dueDateTimestamp,
@@ -108,8 +124,8 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
       );
 
       toast({
-        title: "Invoice Created Successfully",
-        description: `Invoice for ${amount} APT has been created and submitted for funding review`,
+        title: "Accrued Income Created Successfully",
+        description: `Accrued income for ${amount} APT has been created and submitted for funding review`,
       });
 
       // Reset form
@@ -123,13 +139,13 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
         description: ""
       });
 
-      if (onInvoiceCreated) {
-        onInvoiceCreated();
+      if (onIncomeCreated) {
+        onIncomeCreated();
       }
     } catch (error) {
       toast({
-        title: "Invoice Creation Failed",
-        description: error instanceof Error ? error.message : "Failed to create invoice",
+        title: "Accrued Income Creation Failed",
+        description: error instanceof Error ? error.message : "Failed to create accrued income",
         variant: "destructive",
       });
     }
@@ -152,28 +168,29 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
   };
 
   return (
-    <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
-      <CardHeader>
-        <CardTitle className="text-white flex items-center">
-          <div className="w-8 h-8 bg-gradient-to-r from-green-500 to-blue-500 rounded-lg flex items-center justify-center mr-3">
-            📄
-          </div>
-          Create New Invoice
-        </CardTitle>
-        <CardDescription className="text-gray-400">
-          Submit an invoice for funding. You'll receive 90% of the invoice amount immediately upon approval.
-        </CardDescription>
-      </CardHeader>
+    <div className="bg-white text-black dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+      <div className="p-8">
+        <div className="mb-6">
+          <h2 className="text-2xl font-semibold text-slate-900 dark:text-white">
+            Create Accrued Income Entry
+          </h2>
+          <p className="text-slate-600 dark:text-slate-400 mt-1">
+            Submit your accrued income for funding. You'll receive 90% of the amount immediately upon approval.
+          </p>
+        </div>
 
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Invoice Details */}
-          <div className="space-y-4">
-            <h4 className="text-white font-semibold">Invoice Details</h4>
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* Income Details */}
+          <div className="space-y-6">
+            <h3 className="text-lg font-medium text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">
+              Income Details
+            </h3>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <Label htmlFor="amount" className="text-gray-300">Invoice Amount (APT)</Label>
+                <Label htmlFor="amount" className="text-slate-700 dark:text-slate-300 text-base font-medium">
+                  Income Amount (APT)
+                </Label>
                 <Input
                   id="amount"
                   type="number"
@@ -183,37 +200,41 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
                   value={formData.amount}
                   onChange={(e) => handleInputChange("amount", e.target.value)}
                   disabled={loading}
-                  className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-500"
+                  className="mt-2 h-12 text-base border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
                 {formData.amount && (
-                  <p className="text-xs text-green-400 mt-1">
+                  <p className="text-sm text-emerald-600 dark:text-emerald-400 mt-2">
                     You'll receive: {calculateFundingAmount(formData.amount).toFixed(2)} APT (90%)
                   </p>
                 )}
               </div>
 
               <div>
-                <Label htmlFor="dueDate" className="text-gray-300">Due Date</Label>
+                <Label htmlFor="dueDate" className="text-slate-700 dark:text-slate-300 text-base font-medium">
+                  Due Date
+                </Label>
                 <Input
                   id="dueDate"
                   type="date"
                   value={formData.dueDate}
                   onChange={(e) => handleInputChange("dueDate", e.target.value)}
                   disabled={loading}
-                  className="bg-gray-800/50 border-gray-600 text-white"
+                  className="mt-2 h-12 text-base border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
               </div>
 
               <div>
-                <Label htmlFor="incomeType" className="text-gray-300">Income Type</Label>
+                <Label htmlFor="incomeType" className="text-slate-700 dark:text-slate-300 text-base font-medium">
+                  Income Type
+                </Label>
                 <select
                   id="incomeType"
                   value={formData.incomeType}
                   onChange={(e) => handleInputChange("incomeType", e.target.value)}
                   disabled={loading}
-                  className="w-full bg-gray-800/50 border border-gray-600 text-white rounded-md px-3 py-2"
+                  className="mt-2 w-full h-12 text-base bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white rounded-md px-3 focus:border-blue-500 focus:ring-blue-500"
                   required
                 >
                   {Object.entries(INCOME_TYPES).map(([name, value]) => (
@@ -225,7 +246,9 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
               </div>
 
               <div>
-                <Label htmlFor="description" className="text-gray-300">Description</Label>
+                <Label htmlFor="description" className="text-slate-700 dark:text-slate-300 text-base font-medium">
+                  Description
+                </Label>
                 <Input
                   id="description"
                   type="text"
@@ -233,7 +256,7 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
                   value={formData.description}
                   onChange={(e) => handleInputChange("description", e.target.value)}
                   disabled={loading}
-                  className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-500"
+                  className="mt-2 h-12 text-base border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
               </div>
@@ -241,12 +264,16 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
           </div>
 
           {/* Payer Information */}
-          <div className="space-y-4">
-            <h4 className="text-white font-semibold">Payer Information</h4>
+          <div className="space-y-6">
+            <h3 className="text-lg font-medium text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-2">
+              Payer Information
+            </h3>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                <Label htmlFor="payerName" className="text-gray-300">Payer Name *</Label>
+                <Label htmlFor="payerName" className="text-slate-700 dark:text-slate-300 text-base font-medium">
+                  Payer Name *
+                </Label>
                 <Input
                   id="payerName"
                   type="text"
@@ -254,13 +281,15 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
                   value={formData.payerName}
                   onChange={(e) => handleInputChange("payerName", e.target.value)}
                   disabled={loading}
-                  className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-500"
+                  className="mt-2 h-12 text-base border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
               </div>
 
               <div>
-                <Label htmlFor="payerEmail" className="text-gray-300">Payer Email</Label>
+                <Label htmlFor="payerEmail" className="text-slate-700 dark:text-slate-300 text-base font-medium">
+                  Payer Email
+                </Label>
                 <Input
                   id="payerEmail"
                   type="email"
@@ -268,12 +297,14 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
                   value={formData.payerEmail}
                   onChange={(e) => handleInputChange("payerEmail", e.target.value)}
                   disabled={loading}
-                  className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-500"
+                  className="mt-2 h-12 text-base border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
 
               <div>
-                <Label htmlFor="payerPhone" className="text-gray-300">Payer Phone</Label>
+                <Label htmlFor="payerPhone" className="text-slate-700 dark:text-slate-300 text-base font-medium">
+                  Payer Phone
+                </Label>
                 <Input
                   id="payerPhone"
                   type="tel"
@@ -281,7 +312,7 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
                   value={formData.payerPhone}
                   onChange={(e) => handleInputChange("payerPhone", e.target.value)}
                   disabled={loading}
-                  className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-500"
+                  className="mt-2 h-12 text-base border-slate-300 dark:border-slate-600 focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -289,50 +320,55 @@ export function InvoiceCreationForm({ onInvoiceCreated }: InvoiceCreationFormPro
 
           {/* Summary */}
           {formData.amount && formData.dueDate && (
-            <div className="bg-gray-800/30 rounded-lg p-4">
-              <h4 className="text-white font-semibold mb-3">Invoice Summary</h4>
-              <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-6">
+              <h4 className="text-lg font-medium text-slate-900 dark:text-white mb-4">Income Summary</h4>
+              <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <span className="text-gray-400">Invoice Amount:</span>
-                  <span className="ml-2 text-white font-semibold">{formData.amount} APT</span>
+                  <div className="text-slate-600 dark:text-slate-400 text-sm">Income Amount</div>
+                  <div className="text-slate-900 dark:text-white font-semibold text-lg">{formData.amount} APT</div>
                 </div>
                 <div>
-                  <span className="text-gray-400">You'll Receive:</span>
-                  <span className="ml-2 text-green-400 font-semibold">
+                  <div className="text-slate-600 dark:text-slate-400 text-sm">You'll Receive</div>
+                  <div className="text-emerald-600 dark:text-emerald-400 font-semibold text-lg">
                     {calculateFundingAmount(formData.amount).toFixed(2)} APT
-                  </span>
+                  </div>
                 </div>
                 <div>
-                  <span className="text-gray-400">Due Date:</span>
-                  <span className="ml-2 text-white font-semibold">
+                  <div className="text-slate-600 dark:text-slate-400 text-sm">Due Date</div>
+                  <div className="text-slate-900 dark:text-white font-semibold">
                     {new Date(formData.dueDate).toLocaleDateString()}
-                  </span>
+                  </div>
                 </div>
                 <div>
-                  <span className="text-gray-400">Type:</span>
-                  <span className="ml-2 text-white font-semibold">
+                  <div className="text-slate-600 dark:text-slate-400 text-sm">Type</div>
+                  <div className="text-slate-900 dark:text-white font-semibold">
                     {getIncomeTypeName(formData.incomeType)}
-                  </span>
+                  </div>
                 </div>
               </div>
-              <div className="mt-3 p-3 bg-blue-900/20 rounded border border-blue-500/20">
-                <p className="text-blue-400 text-xs">
-                  💡 Your invoice will be reviewed for funding approval based on your risk assessment. 
-                  Approved invoices receive 90% funding immediately.
-                </p>
+              <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div className="flex items-start">
+                  <span className="text-blue-600 dark:text-blue-400 text-xl mr-3">💡</span>
+                  <div>
+                    <div className="font-medium text-blue-800 dark:text-blue-200 text-sm">
+                      Your income will be reviewed for funding approval based on your KYC verification. 
+                      Approved entries receive 90% funding immediately.
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
           <Button 
             type="submit"
-            disabled={loading || !formData.amount || !formData.dueDate || !formData.payerName || !formData.description}
-            className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white"
+            disabled={loading || kycStatus !== KYC_STATUS.APPROVED || !formData.amount || !formData.dueDate || !formData.payerName || !formData.description}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 text-lg font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Creating Invoice..." : "Create Invoice"}
+            {loading ? "Creating Income Entry..." : kycStatus !== KYC_STATUS.APPROVED ? "KYC Verification Required" : "Create Income Entry"}
           </Button>
         </form>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
