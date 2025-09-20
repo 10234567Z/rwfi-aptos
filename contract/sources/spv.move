@@ -298,7 +298,7 @@ module rwfi_addr::spv {
         assert!(amount > 0, E_INVALID_AMOUNT);
         let supplier_addr = signer::address_of(supplier);
         let supplier_reg = borrow_global_mut<SupplierRegistery>(@rwfi_addr);
-        assert!(table::contains(&supplier_reg.suppliers, supplier_addr) == false, E_REGISTRY_NOT_EXISTS);
+        assert!(table::contains(&supplier_reg.suppliers, supplier_addr), E_REGISTRY_NOT_EXISTS);
 
         let supplier_table = table::borrow_mut(&mut supplier_reg.suppliers, supplier_addr);
 
@@ -422,6 +422,26 @@ module rwfi_addr::spv {
         // Update KYC information
         profile.KYC_APPROVED = false;
         profile.proof_hash = document_hashes;
+    }
+
+    // Allow a supplier to register themselves. Minimal safe upsert.
+    public entry fun register_supplier(
+        supplier: &signer
+    ) acquires SupplierRegistery {
+        let supplier_addr = signer::address_of(supplier);
+        let registry = borrow_global_mut<SupplierRegistery>(@rwfi_addr);
+
+        // If supplier already exists, do nothing
+        if (!table::contains(&registry.suppliers, supplier_addr)) {
+            let new_supplier = Supplier {
+                supplier_addr,
+                KYC_APPROVED: false,
+                proof_hash: vector::empty<vector<u8>>(),
+                invoice_id: vector::empty<u64>(),
+            };
+            table::upsert(&mut registry.suppliers, supplier_addr, new_supplier);
+            registry.supplier_count = registry.supplier_count + 1;
+        };
     }
 
     // Admin approves or rejects KYC
