@@ -1,7 +1,6 @@
 module rwfi_addr::spv {
     use aptos_std::signer;
     use rwfi_addr::invoice_coin;
-    use rwfi_addr::accrued_income_registry;
     use aptos_framework::table::{Self, Table};
     use aptos_framework::aptos_account;
     use aptos_framework::timestamp;
@@ -40,6 +39,66 @@ module rwfi_addr::spv {
     const ERROR_SUPPLIER_NOT_FOUND: u64 = 21;
     /// Default not found
     const E_DEFAULT_NOT_FOUND: u64 = 22;
+    /// Registry not found for supplier
+    const E_REGISTRY_NOT_EXISTS: u64 = 23;
+    /// Income entry not found
+    const E_INCOME_NOT_EXISTS: u64 = 24;
+    /// Not authorized to access this income
+    const E_NOT_AUTHORIZED: u64 = 25;
+    /// Invalid income amount
+    const E_INVALID_AMOUNT: u64 = 26;
+
+    // Income types for better categorization
+    const INCOME_TYPE_SALARY: u64 = 1;
+    const INCOME_TYPE_SUBSCRIPTION: u64 = 2;
+    const INCOME_TYPE_FREELANCE: u64 = 3;
+    const INCOME_TYPE_BUSINESS_INVOICE: u64 = 4;
+    const INCOME_TYPE_OTHER: u64 = 5;
+
+    // Income status
+    const STATUS_PENDING: u64 = 1;
+    const STATUS_FUNDED: u64 = 2;
+    const STATUS_COLLECTED: u64 = 3;
+    const STATUS_CANCELLED: u64 = 4;
+
+    struct PayerData has store, copy, drop {
+        info: vector<u8>, // JSON string with payer details
+        contact: vector<u8>, // Contact information
+    }
+
+    struct AccruedIncome has store, copy, drop {
+        supplier_addr: address,
+        amount: u64, // Total expected income
+        funded_amount: u64, // Amount funded by SPV (90%)
+        due_date: u64, // When income is expected
+        income_type: u64, // Type of income (salary, subscription, etc.)
+        payer_data: PayerData, // Who will pay this income
+        description: vector<u8>, // Description of the income
+        status: u64, // Current status
+        created_at: u64, // Timestamp when created
+        funded_at: u64, // Timestamp when funded (0 if not funded)
+        spv_owned: bool, // Whether SPV owns this income
+    }
+
+    struct IncomeRegistry has key {
+        incomes: Table<u64, AccruedIncome>,
+        income_count: u64,
+        total_funded: u64,
+        total_collected: u64,
+    }
+
+    struct SupplierRegistery has key {
+        suppliers: Table<address, Supplier>,
+        supplier_count: u64, 
+    }
+
+    struct Supplier has key, store, copy, drop {
+        supplier_addr: address,
+        KYC_APPROVED: bool,
+        proof_hash: vector<vector<u8>>,
+        invoice_id: vector<u64>,
+    }
+
 
     // Constants
     const FUNDING_PERCENTAGE: u64 = 90; // Fund 90% of income amount
@@ -163,6 +222,18 @@ module rwfi_addr::spv {
         // Create resource account for treasury operations
         let (_treasury_signer, treasury_cap) = account::create_resource_account(admin, b"SPV_TREASURY");
         
+        let income_reg = IncomeRegistry {
+            incomes: table::new(),
+            income_count: 0,
+            total_funded: 0,
+            total_collected: 0,
+        };
+
+        let supplier_reg = SupplierRegistery {
+            suppliers: table::new(),
+            supplier_count: 0,
+        };
+
         let pool = InvestmentPool {
             total_apt_invested: 0,
             total_collections: 0,
@@ -211,6 +282,84 @@ module rwfi_addr::spv {
         move_to(admin, default_management);
         move_to(admin, default_registry);
         move_to(admin, epoch_registry);
+        move_to(admin, supplier_reg);
+        move_to(admin, income_reg);
+    }
+
+    public entry fun create_accrued_income(
+        supplier: &signer,
+        amount: u64,
+        due_date: u64,
+        income_type: u64,
+        payer_info: vector<u8>,
+        payer_contact: vector<u8>,
+        description: vector<u8>
+    ) acquires IncomeRegistry, SupplierRegistery {
+        assert!(amount > 0, E_INVALID_AMOUNT);
+        let supplier_addr = signer::address_of(supplier);
+        let supplier_reg = borrow_global_mut<SupplierRegistery>(@rwfi_addr);
+        assert!(table::contains(&supplier_reg.suppliers, supplier_addr) == false, E_REGISTRY_NOT_EXISTS);
+
+        let supplier_table = table::borrow_mut(&mut supplier_reg.suppliers, supplier_addr);
+
+        let registry = borrow_global_mut<IncomeRegistry>(@rwfi_addr);
+
+
+        // Create income object first
+        let income = AccruedIncome {
+            supplier_addr,
+            amount,
+            funded_amount: 0,
+            due_date,
+            income_type,
+            payer_data: PayerData {
+                info: payer_info,
+                contact: payer_contact,
+            },
+            description,
+            status: STATUS_PENDING,
+            created_at: timestamp::now_seconds(),
+            funded_at: 0,
+            spv_owned: false,
+        };
+
+
+        // Update existing registry
+        let next_income_id = registry.income_count + 1;
+        registry.income_count = next_income_id;
+        table::add(&mut registry.incomes, next_income_id, income);
+        supplier_table.invoice_id.push_back(next_income_id);
+    }
+
+    public fun mark_income_funded(
+        supplier_addr: address,
+        income_id: u64,
+        funded_amount: u64
+    ) acquires IncomeRegistry {       
+        let registry = borrow_global_mut<IncomeRegistry>(@rwfi_addr);
+        let income = table::borrow_mut(&mut registry.incomes, income_id);
+        assert!(income.status == STATUS_PENDING, E_INCOME_ALREADY_FUNDED);
+        
+        income.funded_amount = funded_amount;
+        income.status = STATUS_FUNDED;
+        income.funded_at = timestamp::now_seconds();
+        income.spv_owned = true;
+        
+        registry.total_funded = registry.total_funded + funded_amount;
+    }
+
+    public(friend) fun mark_income_collected(
+        supplier_addr: address,
+        income_id: u64
+    ) acquires IncomeRegistry {
+        let registry = borrow_global_mut<IncomeRegistry>(@rwfi_addr);
+        assert!(table::contains(&registry.incomes, income_id), E_INCOME_NOT_EXISTS);
+        
+        let income = table::borrow_mut(&mut registry.incomes, income_id);
+        assert!(income.status == STATUS_FUNDED, E_NOT_AUTHORIZED);
+        
+        income.status = STATUS_COLLECTED;
+        registry.total_collected = registry.total_collected + income.amount;
     }
 
     // Investors invest APT and get INV tokens
@@ -263,50 +412,16 @@ module rwfi_addr::spv {
     public entry fun submit_kyc_documents(
         supplier: &signer,
         document_hashes: vector<vector<u8>>,
-        kyc_level: u8
-    ) acquires RiskRegistry {
+        kyc_level: bool
+    ) acquires SupplierRegistery{
         let supplier_addr = signer::address_of(supplier);
-        
-        // Validate inputs
-        assert!(kyc_level == KYC_LEVEL_BASIC || kyc_level == KYC_LEVEL_ENHANCED, E_INVALID_WITHDRAWAL_AMOUNT);
-        assert!(vector::length(&document_hashes) > 0, E_INVALID_DOCUMENT_HASH);
-        
-        let registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
-        
-        // Create or update supplier profile for KYC
-        if (!table::contains(&registry.supplier_profiles, supplier_addr)) {
-            // Create new profile with minimal data for KYC-only flow
-            let profile = SupplierRiskProfile {
-                supplier_addr,
-                credit_score: 0, // Not required for KYC
-                total_funded: 0,
-                successful_payments: 0,
-                defaults: 0,
-                risk_score: 0, // Not required for KYC
-                business_age_months: 0, // Not required for KYC
-                annual_revenue: 0, // Not required for KYC
-                industry_type: 1, // Default value
-                last_updated: timestamp::now_seconds(),
-                approved_for_funding: false, // Will be determined by KYC approval
-                // Initialize KYC fields
-                kyc_status: KYC_STATUS_NONE,
-                kyc_submission_timestamp: 0,
-                kyc_approval_timestamp: 0,
-                document_hashes: vector::empty(),
-                kyc_level: KYC_LEVEL_BASIC,
-            };
-            table::upsert(&mut registry.supplier_profiles, supplier_addr, profile);
-        };
-        
-        let profile = table::borrow_mut(&mut registry.supplier_profiles, supplier_addr);
-        assert!(profile.kyc_status == KYC_STATUS_NONE || profile.kyc_status == KYC_STATUS_REJECTED, E_KYC_ALREADY_SUBMITTED);
+        let supplier_reg = borrow_global_mut<SupplierRegistery>(@rwfi_addr);
+
+        let profile = table::borrow_mut(&mut supplier_reg.suppliers, supplier_addr);
         
         // Update KYC information
-        profile.kyc_status = KYC_STATUS_PENDING;
-        profile.kyc_submission_timestamp = timestamp::now_seconds();
-        profile.document_hashes = document_hashes;
-        profile.kyc_level = kyc_level;
-        profile.approved_for_funding = false; // Reset approval until KYC approved
+        profile.KYC_APPROVED = false;
+        profile.proof_hash = document_hashes;
     }
 
     // Admin approves or rejects KYC
@@ -314,24 +429,16 @@ module rwfi_addr::spv {
         admin: &signer,
         supplier_addr: address,
         approve: bool
-    ) acquires RiskRegistry {
+    ) acquires SupplierRegistery {
         assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         
-        let registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
-        assert!(table::contains(&registry.supplier_profiles, supplier_addr), ERROR_SUPPLIER_NOT_FOUND);
+        let registry = borrow_global_mut<SupplierRegistery>(@rwfi_addr);
+        assert!(table::contains(&registry.suppliers, supplier_addr), ERROR_SUPPLIER_NOT_FOUND);
         
-        let profile = table::borrow_mut(&mut registry.supplier_profiles, supplier_addr);
-        assert!(profile.kyc_status == KYC_STATUS_PENDING, E_KYC_NOT_SUBMITTED);
+        let profile = table::borrow_mut(&mut registry.suppliers, supplier_addr);
         
         // Update KYC status
-        profile.kyc_status = if (approve) { KYC_STATUS_APPROVED } else { KYC_STATUS_REJECTED };
-        profile.kyc_approval_timestamp = timestamp::now_seconds();
-        
-        // If approved, enable for funding
-        if (approve) {
-            profile.approved_for_funding = true;
-        };
-        profile.approved_for_funding = approve; // Only allow funding if KYC approved
+        profile.KYC_APPROVED = approve;
     }
 
     // Admin funds an accrued income (90% of amount)
@@ -339,12 +446,12 @@ module rwfi_addr::spv {
         admin: &signer,
         supplier_addr: address,
         income_id: u64
-    ) acquires InvestmentPool, FundedIncomeRegistry {
+    ) acquires InvestmentPool, FundedIncomeRegistry, IncomeRegistry {
         assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         
         // Get income details
-        let income = accrued_income_registry::get_income(supplier_addr, income_id);
-        let funding_amount = (accrued_income_registry::get_income_amount(&income) * FUNDING_PERCENTAGE) / 100;
+        let income = get_income(supplier_addr, income_id);
+        let funding_amount = (income.amount * FUNDING_PERCENTAGE) / 100;
         
         // Check if we have enough funds
         let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
@@ -366,7 +473,7 @@ module rwfi_addr::spv {
             supplier_addr,
             income_id,
             funded_amount: funding_amount,
-            expected_collection: accrued_income_registry::get_income_amount(&income),
+            expected_collection: income.amount,
             funded_at: timestamp::now_seconds(),
             collected: false,
             collected_at: 0,
@@ -376,7 +483,7 @@ module rwfi_addr::spv {
         table::upsert(&mut funded_registry.funded_incomes, funded_registry.funded_count, funded_income);
         
         // Mark income as funded in registry
-        accrued_income_registry::mark_income_funded(supplier_addr, income_id, funding_amount);
+        mark_income_funded(supplier_addr, income_id, funding_amount);
     }
 
     // Record income collection when payment comes in
@@ -384,7 +491,7 @@ module rwfi_addr::spv {
         admin: &signer,
         funded_income_id: u64,
         collected_amount: u64
-    ) acquires InvestmentPool, FundedIncomeRegistry, RiskRegistry, EpochRegistry {
+    ) acquires InvestmentPool, FundedIncomeRegistry, EpochRegistry, IncomeRegistry {
         assert!(signer::address_of(admin) == @rwfi_addr, E_INVALID_ADMIN_SIGNER);
         
         let funded_registry = borrow_global_mut<FundedIncomeRegistry>(@rwfi_addr);
@@ -407,16 +514,8 @@ module rwfi_addr::spv {
         // Create new epoch when collections happen - now with funding timestamp
         create_new_epoch_internal(collected_amount, funded_income.funded_at, funded_income_id);
         
-        // Update supplier risk profile on successful payment
-        let risk_registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&risk_registry.supplier_profiles, supplier_addr)) {
-            let supplier_profile = table::borrow_mut(&mut risk_registry.supplier_profiles, supplier_addr);
-            supplier_profile.successful_payments = supplier_profile.successful_payments + 1;
-            supplier_profile.last_updated = timestamp::now_seconds();
-        };
-        
         // Mark as collected in income registry
-        accrued_income_registry::mark_income_collected(funded_income.supplier_addr, funded_income.income_id);
+        mark_income_collected(funded_income.supplier_addr, funded_income.income_id);
     }
 
     // Internal function to create new epoch when collections happen - now tracks funding time
@@ -445,7 +544,7 @@ module rwfi_addr::spv {
     // Check for overdue payments and mark defaults (anyone can call this)
     public entry fun check_and_mark_defaults(
         _caller: &signer  // Anyone can call this public service
-    ) acquires FundedIncomeRegistry, DefaultManagement, DefaultRegistry, RiskRegistry {
+    ) acquires FundedIncomeRegistry, DefaultManagement, DefaultRegistry, IncomeRegistry{
         let default_mgmt = borrow_global<DefaultManagement>(@rwfi_addr);
         assert!(default_mgmt.enabled, E_INVALID_WITHDRAWAL_AMOUNT);
         
@@ -464,8 +563,8 @@ module rwfi_addr::spv {
                 // Only check uncollected incomes
                 if (!funded_income.collected) {
                     // Get the original income to check due date
-                    let income = accrued_income_registry::get_income(funded_income.supplier_addr, funded_income.income_id);
-                    let due_date = accrued_income_registry::get_income_due_date(&income);
+                    let income = get_income(funded_income.supplier_addr, funded_income.income_id);
+                    let due_date = income.due_date;
                     let grace_period_seconds = default_mgmt.grace_period_days * SECONDS_PER_DAY;
                     let default_threshold_seconds = default_mgmt.default_threshold_days * SECONDS_PER_DAY;
                     
@@ -515,15 +614,6 @@ module rwfi_addr::spv {
                 // Update default management stats
                 let default_mgmt = borrow_global_mut<DefaultManagement>(@rwfi_addr);
                 default_mgmt.total_defaults = default_mgmt.total_defaults + 1;
-                
-                // Update supplier risk profile
-                let risk_registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
-                if (table::contains(&risk_registry.supplier_profiles, funded_income.supplier_addr)) {
-                    let supplier_profile = table::borrow_mut(&mut risk_registry.supplier_profiles, funded_income.supplier_addr);
-                    supplier_profile.defaults = supplier_profile.defaults + 1;
-                    supplier_profile.approved_for_funding = false; // Disable funding after default
-                    supplier_profile.last_updated = timestamp::now_seconds();
-                };
             };
             
             j = j + 1;
@@ -538,11 +628,13 @@ module rwfi_addr::spv {
         };
     }
 
+    // --------------------------------------------
+
     // Internal function to mark an income as defaulted
     fun mark_income_as_defaulted_internal(
         funded_income_id: u64,
         funded_income: &FundedIncome
-    ) acquires DefaultRegistry, DefaultManagement, RiskRegistry {
+    ) acquires DefaultRegistry, DefaultManagement {
         let default_registry = borrow_global_mut<DefaultRegistry>(@rwfi_addr);
         
         // Check if already defaulted
@@ -569,15 +661,6 @@ module rwfi_addr::spv {
         // Update default management stats
         let default_mgmt = borrow_global_mut<DefaultManagement>(@rwfi_addr);
         default_mgmt.total_defaults = default_mgmt.total_defaults + 1;
-        
-        // Update supplier risk profile
-        let risk_registry = borrow_global_mut<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&risk_registry.supplier_profiles, funded_income.supplier_addr)) {
-            let supplier_profile = table::borrow_mut(&mut risk_registry.supplier_profiles, funded_income.supplier_addr);
-            supplier_profile.defaults = supplier_profile.defaults + 1;
-            supplier_profile.approved_for_funding = false; // Disable funding after default
-            supplier_profile.last_updated = timestamp::now_seconds();
-        };
         
         // Note: In a full implementation, you might want to adjust pool accounting for the loss
         // For now, we'll just track it in the default registry
@@ -640,6 +723,8 @@ module rwfi_addr::spv {
         defaulted_income.written_off = true;
         defaulted_income.recovery_status = 4; // Written Off
     }
+
+    // -------------------------------------------------
 
     // Timestamp-based withdrawal system - only returns from invoices funded AFTER investment
     public entry fun withdraw_returns_timestamp_based(
@@ -737,6 +822,15 @@ module rwfi_addr::spv {
     }
 
     // Helper function to get treasury address
+
+    #[view]
+    public fun get_income(supplier_addr: address, income_id: u64): AccruedIncome acquires IncomeRegistry {
+        assert!(exists<IncomeRegistry>(@rwfi_addr), E_REGISTRY_NOT_EXISTS);
+        let registry = borrow_global<IncomeRegistry>(@rwfi_addr);
+        assert!(table::contains(&registry.incomes, income_id), E_INCOME_NOT_EXISTS);
+        *table::borrow(&registry.incomes, income_id)
+    }
+
     #[view]
     public fun get_treasury_address(): address acquires InvestmentPool {
         let pool = borrow_global<InvestmentPool>(@rwfi_addr);
@@ -795,46 +889,11 @@ module rwfi_addr::spv {
         (inv_tokens * pool.total_collections) / total_inv_supply
     }
 
-    // Risk Management View Functions
-    #[view]
-    public fun get_supplier_risk_profile(supplier_addr: address): (bool, SupplierRiskProfile) acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
-            (true, *table::borrow(&registry.supplier_profiles, supplier_addr))
-        } else {
-            (false, SupplierRiskProfile {
-                supplier_addr,
-                credit_score: 0,
-                total_funded: 0,
-                successful_payments: 0,
-                defaults: 0,
-                risk_score: 0,
-                business_age_months: 0,
-                annual_revenue: 0,
-                industry_type: 0,
-                last_updated: 0,
-                approved_for_funding: false,
-                kyc_status: KYC_STATUS_NONE,
-                kyc_submission_timestamp: 0,
-                kyc_approval_timestamp: 0,
-                document_hashes: vector::empty(),
-                kyc_level: KYC_LEVEL_BASIC,
-            })
-        }
-    }
-
-    // DEPRECATED: Risk management view function kept for backward compatibility
-    #[view]
-    public fun get_simplified_risk_config(): (u64, bool) acquires RiskManagement {
-        let risk_mgmt = borrow_global<RiskManagement>(@rwfi_addr);
-        (risk_mgmt.min_credit_score, risk_mgmt.enabled)
-    }
-
-    // KYC View Functions
+    // KYC View Functions TODO
     #[view] 
-    public fun get_all_pending_kyc_suppliers(): vector<SupplierKYCInfo> acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        let pending_suppliers = vector::empty<SupplierKYCInfo>();
+    public fun get_all_pending_kyc_suppliers(): vector<Supplier> acquires SupplierRegistery {
+        let registry = borrow_global<SupplierRegistery>(@rwfi_addr);
+        let pending_suppliers = vector::empty<Supplier>();
         
         // Note: Since Move doesn't support table iteration directly, 
         // this returns an empty vector. In practice, you'd maintain a separate
@@ -843,74 +902,23 @@ module rwfi_addr::spv {
     }
 
     #[view]
-    public fun get_supplier_kyc_details(supplier_addr: address): SupplierKYCInfo acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        assert!(table::contains(&registry.supplier_profiles, supplier_addr), ERROR_SUPPLIER_NOT_FOUND);
+    public fun get_supplier_kyc_details(supplier_addr: address): vector<vector<u8>> acquires SupplierRegistery {
+        let registry = borrow_global<SupplierRegistery>(@rwfi_addr);
+        assert!(table::contains(&registry.suppliers, supplier_addr), ERROR_SUPPLIER_NOT_FOUND);
         
-        let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
-        SupplierKYCInfo {
-            supplier_address: supplier_addr,
-            business_name: string::utf8(b"Business Name"), // Placeholder - would be stored in profile
-            business_license: string::utf8(b"License123"), // Placeholder - would be stored in profile  
-            tax_id: string::utf8(b"TAX123"), // Placeholder - would be stored in profile
-            status: profile.kyc_status,
-            submitted_at: profile.kyc_submission_timestamp,
-            reviewed_at: profile.kyc_approval_timestamp,
-            reviewed_by: @rwfi_addr // Simplified for now
-        }
+        let profile = table::borrow(&registry.suppliers, supplier_addr);
+        profile.proof_hash
     }
 
-    #[view]
-    public fun get_kyc_stats(): (u64, u64, u64, u64) acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        
-        // Note: Since Move doesn't support table iteration directly,
-        // this returns simplified stats. In practice, you'd maintain counters
-        // or a separate data structure for tracking stats
-        (0, 0, 0, 0) // (total, pending, approved, rejected)
-    }
-
-    // Check if supplier has submitted KYC
-    #[view]
-    public fun check_supplier_kyc_status(supplier_addr: address): (bool, u8, u64, u64) acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
-            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
-            (true, profile.kyc_status, profile.kyc_submission_timestamp, profile.kyc_approval_timestamp)
-        } else {
-            (false, KYC_STATUS_NONE, 0, 0)
-        }
-    }
-    #[view]
-    public fun get_kyc_status(supplier_addr: address): u8 acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
-            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
-            profile.kyc_status
-        } else {
-            KYC_STATUS_NONE
-        }
-    }
 
     #[view]
-    public fun is_kyc_approved(supplier_addr: address): bool acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
-            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
-            profile.kyc_status == KYC_STATUS_APPROVED
+    public fun get_kyc_status(supplier_addr: address): bool acquires SupplierRegistery {
+        let registry = borrow_global<SupplierRegistery>(@rwfi_addr);
+        if (table::contains(&registry.suppliers, supplier_addr)) {
+            let profile = table::borrow(&registry.suppliers, supplier_addr);
+            profile.KYC_APPROVED
         } else {
             false
-        }
-    }
-
-    #[view]
-    public fun get_document_hashes(supplier_addr: address): vector<vector<u8>> acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
-            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
-            profile.document_hashes
-        } else {
-            vector::empty()
         }
     }
 
@@ -998,17 +1006,6 @@ module rwfi_addr::spv {
     }
 
     #[view]
-    public fun is_supplier_approved_for_funding(supplier_addr: address): bool acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        if (table::contains(&registry.supplier_profiles, supplier_addr)) {
-            let profile = table::borrow(&registry.supplier_profiles, supplier_addr);
-            profile.approved_for_funding
-        } else {
-            false
-        }
-    }
-
-    #[view]
     public fun calculate_withdrawal_amount_timestamp_based(investor_addr: address, inv_tokens: u64): (u64, u64) acquires InvestmentPool, InvestorRegistry, EpochRegistry {
         let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         if (!table::contains(&registry.investors, investor_addr)) {
@@ -1033,11 +1030,5 @@ module rwfi_addr::spv {
         };
         
         (total_withdrawable, returns_amount)
-    }
-
-    #[view]
-    public fun get_risk_registry_stats(): (u64, u64) acquires RiskRegistry {
-        let registry = borrow_global<RiskRegistry>(@rwfi_addr);
-        (0, 0) // Simplified return - in practice would count supplier_profiles table size
     }
 }

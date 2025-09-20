@@ -335,7 +335,6 @@ module rwfi_addr::invoice_coin {
         fungible_asset::burn(&management.burn_ref, fa);
     }
 
-    /// Get total supply of INV tokens
     #[view]
     public fun get_total_supply(): u64 {
         let metadata = metadata();
