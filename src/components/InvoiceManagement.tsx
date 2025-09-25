@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { useInvoiceCreation } from "@/hooks/useContract";
 import { INCOME_TYPES, INCOME_STATUS } from "@/utils/aptosClient";
 
 interface Invoice {
@@ -21,8 +22,9 @@ interface Invoice {
 
 export function InvoiceManagement() {
   const { account } = useWallet();
-  const [invoices] = useState<Invoice[]>([]);
-  const [loading] = useState(false);
+  const { getSupplierInvoices } = useInvoiceCreation();
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const getStatusColor = (status: number) => {
     switch (status) {
@@ -83,6 +85,20 @@ export function InvoiceManagement() {
       return { name: payerInfo };
     }
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      if (!account) return;
+      setLoading(true);
+      const res = await getSupplierInvoices(account.address?.toString());
+      if (!mounted) return;
+      setInvoices(res as Invoice[]);
+      setLoading(false);
+    };
+    load();
+    return () => { mounted = false; };
+  }, [account?.address]);
 
   if (!account) {
     return (

@@ -8,7 +8,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useInvoiceCreation } from "@/hooks/useContract";
 import { useKYC } from "@/hooks/useKYC";
-import { INCOME_TYPES, KYC_STATUS } from "@/utils/aptosClient";
+import { INCOME_TYPES, KYC_STATUS, toOctas, toUnixSec } from "@/utils/aptosClient";
 
 interface CleanIncomeFormProps {
   onIncomeCreated?: () => void;
@@ -46,7 +46,7 @@ export function CleanIncomeForm({ onIncomeCreated }: CleanIncomeFormProps) {
       return;
     }
 
-    if (kycStatus !== KYC_STATUS.APPROVED) {
+    if (kycStatus !== true) {
       toast({
         title: "KYC Verification Required",
         description: "Please complete and get approved for KYC verification before creating accrued income",
@@ -97,8 +97,8 @@ export function CleanIncomeForm({ onIncomeCreated }: CleanIncomeFormProps) {
     }
 
     try {
-      const amountInOctas = (amount * 100_000_000).toString();
-      const dueDateTimestamp = Math.floor(dueDate.getTime() / 1000);
+  const amountInOctas = toOctas(amount);
+  const dueDateTimestamp = toUnixSec(dueDate);
       
       const payerInfo = JSON.stringify({
         name: formData.payerName,
@@ -362,13 +362,14 @@ export function CleanIncomeForm({ onIncomeCreated }: CleanIncomeFormProps) {
 
           <Button 
             type="submit"
-            disabled={loading || kycStatus !== KYC_STATUS.APPROVED || !formData.amount || !formData.dueDate || !formData.payerName || !formData.description}
+            disabled={loading || kycStatus !== true  || !formData.amount || !formData.dueDate || !formData.payerName || !formData.description}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 text-lg font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Creating Income Entry..." : kycStatus !== KYC_STATUS.APPROVED ? "KYC Verification Required" : "Create Income Entry"}
+            {loading ? "Creating Income Entry..." : !kycStatus ? "KYC Verification Required" : "Create Income Entry"}
           </Button>
         </form>
       </div>
     </div>
   );
 }
+  

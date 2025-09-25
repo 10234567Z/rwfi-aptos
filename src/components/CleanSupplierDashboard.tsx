@@ -7,14 +7,13 @@ import { CleanIncomeForm } from "@/components/CleanIncomeForm";
 import { InvoiceManagement } from "@/components/InvoiceManagement";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useKYC } from "@/hooks/useKYC";
-import { KYC_STATUS } from "@/utils/aptosClient";
 
 type SupplierStep = "kyc-verification" | "create-income" | "manage-income";
 
 export function CleanSupplierDashboard() {
   const { account } = useWallet();
   const [currentStep, setCurrentStep] = useState<SupplierStep>("kyc-verification");
-  const { kycStatus, getKYCStatusText } = useKYC();
+  const { kycStatus} = useKYC();
 
   const handleKYCSubmitted = () => {
     // Stay on KYC step until approved
@@ -25,7 +24,7 @@ export function CleanSupplierDashboard() {
   };
 
   // Auto-advance to next step based on KYC status
-  const canProceedToCreateIncome = kycStatus === KYC_STATUS.APPROVED;
+  const canProceedToCreateIncome = kycStatus;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
@@ -46,28 +45,28 @@ export function CleanSupplierDashboard() {
             {/* Step 1: KYC */}
             <div className="flex flex-col items-center">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-lg transition-all ${
-                kycStatus === KYC_STATUS.APPROVED 
+                kycStatus
                   ? 'bg-emerald-500 shadow-lg shadow-emerald-200' 
-                  : kycStatus === KYC_STATUS.PENDING 
+                  : !kycStatus 
                   ? 'bg-amber-500 shadow-lg shadow-amber-200' 
                   : currentStep === "kyc-verification" 
                   ? 'bg-blue-500 shadow-lg shadow-blue-200' 
                   : 'bg-slate-300 dark:bg-slate-600'
               }`}>
-                {kycStatus === KYC_STATUS.APPROVED ? '✓' : '1'}
+                {kycStatus === true ? '✓' : '1'}
               </div>
               <span className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">
                 KYC Verification
               </span>
               {kycStatus !== null && (
                 <span className={`mt-1 text-xs px-2 py-1 rounded-full ${
-                  kycStatus === KYC_STATUS.APPROVED 
+                  kycStatus
                     ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300'
-                    : kycStatus === KYC_STATUS.PENDING
+                    : kycStatus === false
                     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'
                     : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
                 }`}>
-                  {getKYCStatusText(kycStatus)}
+                  {kycStatus ? "Approved" : "Pending Review"}
                 </span>
               )}
             </div>

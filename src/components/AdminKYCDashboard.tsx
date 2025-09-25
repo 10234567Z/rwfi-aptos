@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useKYC, useAdminKYC } from "@/hooks/useKYC";
-import { KYC_LEVEL, KYC_STATUS, CONTRACT_ADDRESS } from "@/utils/aptosClient";
+import { KYC_LEVEL, KYC_STATUS, CONTRACT_ADDRESS, normalizeAddress } from "@/utils/aptosClient";
 import { IPFSDocumentViewer } from "./IPFSDocumentViewer";
 
 interface KYCApplication {
@@ -36,9 +36,11 @@ export function AdminKYCDashboard() {
   const [loading, setLoading] = useState(true);
 
   // Admin access control
-  const adminAddress = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || CONTRACT_ADDRESS;
-  const isAdmin = account?.address?.toString() === adminAddress;
+  const adminAddress = normalizeAddress(process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || CONTRACT_ADDRESS);
 
+  const isAdmin = normalizeAddress(account?.address?.toString()) === adminAddress;
+
+  console.log("Admin Address:", process.env.NEXT_PUBLIC_CONTRACT_ADDRESS );
   // Load real KYC data from blockchain
   useEffect(() => {
     const loadKYCData = async () => {
@@ -64,7 +66,7 @@ export function AdminKYCDashboard() {
         console.log("Pending Applications:", pendingApps);
         
         // If no data from blockchain, show message that data will appear when suppliers submit KYC
-        if (pendingApps.length === 0 && stats.total === 0) {
+        if (!pendingApps || pendingApps.length === 0) {
           setApplications([]);
           toast({
             title: "No KYC Data",
@@ -73,10 +75,10 @@ export function AdminKYCDashboard() {
         } else {
           // Convert blockchain data to component format with safety checks
           const formattedApps: KYCApplication[] = pendingApps.filter(app => app && app.supplier_address).map((app: any) => ({
-            address: app.supplier_address || "Unknown",
+            address: normalizeAddress(app.supplier_address || app.supplier_addr || ""),
             level: KYC_LEVEL.BASIC, // Default to basic for now
-            status: app.status || KYC_STATUS.PENDING,
-            documentHashes: [], // Would be fetched separately if needed
+            status: app.approved ? KYC_STATUS.PENDING : KYC_STATUS.PENDING,
+            documentHashes: Array.isArray(app.proof_hashes) ? app.proof_hashes.filter(Boolean) : [],
             submittedAt: app.submitted_at ? new Date(app.submitted_at * 1000).toISOString() : new Date().toISOString(),
             reviewedAt: app.reviewed_at && app.reviewed_at > 0 ? new Date(app.reviewed_at * 1000).toISOString() : undefined,
           }));
@@ -183,12 +185,12 @@ export function AdminKYCDashboard() {
       setKycStats(stats);
       
       const pendingApps = await getPendingKYCApplications();
-      const formattedApps: KYCApplication[] = pendingApps.map((app: any) => ({
-        address: app.supplier_address,
+      const formattedApps: KYCApplication[] = (pendingApps || []).map((app: any) => ({
+        address: normalizeAddress(app.supplier_address || app.supplier_addr || ""),
         level: KYC_LEVEL.BASIC,
-        status: app.status || KYC_STATUS.PENDING,
-        documentHashes: [],
-        submittedAt: new Date(app.submitted_at * 1000).toISOString(),
+        status: app.approved ? KYC_STATUS.APPROVED : KYC_STATUS.PENDING,
+        documentHashes: Array.isArray(app.proof_hashes) ? app.proof_hashes.filter(Boolean) : [],
+        submittedAt: app.submitted_at ? new Date(app.submitted_at * 1000).toISOString() : new Date().toISOString(),
         reviewedAt: app.reviewed_at > 0 ? new Date(app.reviewed_at * 1000).toISOString() : undefined,
       }));
       

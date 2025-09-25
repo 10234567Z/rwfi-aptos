@@ -4,7 +4,7 @@ version = "2.0.0"
 authors = []
 
 [addresses]
-rwfi_addr = "0x93cc70edd7b85a22f72065f109f05232162fe0ce1e99d95fd903d227e4f2dbd3"
+rwfi_addr = "0x349149306051f2ec64844b13cb8e119dd02ffe02125e2485f839cf4df9765e49"
 
 [dev-addresses]
 rwfi_addr = "0x71383a56eb24011c2c1e086128306036cbb83e98d780ed2ee596def61c15e6cd"

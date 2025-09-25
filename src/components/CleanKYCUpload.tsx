@@ -50,7 +50,7 @@ export function CleanKYCUpload({ onKYCSubmitted }: CleanKYCUploadProps) {
       return;
     }
 
-    if (kycStatus === KYC_STATUS.PENDING) {
+    if (kycStatus === false) {
       toast({
         title: "KYC Already Submitted",
         description: "Your KYC application is already under review",
@@ -59,10 +59,19 @@ export function CleanKYCUpload({ onKYCSubmitted }: CleanKYCUploadProps) {
       return;
     }
 
-    if (kycStatus === KYC_STATUS.APPROVED) {
+    if (kycStatus === true) {
       toast({
         title: "KYC Already Approved",
         description: "Your KYC has already been approved",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (kycStatus === null) {
+      toast({
+        title: "KYC Status not Submitted",
+        description: "Please check your KYC status before submitting",
         variant: "destructive",
       });
       return;
@@ -126,7 +135,7 @@ export function CleanKYCUpload({ onKYCSubmitted }: CleanKYCUploadProps) {
     ];
   };
 
-  const canSubmit = kycStatus === KYC_STATUS.NONE || kycStatus === KYC_STATUS.REJECTED;
+  const canSubmit = kycStatus === false || kycStatus === null;
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
@@ -142,15 +151,11 @@ export function CleanKYCUpload({ onKYCSubmitted }: CleanKYCUploadProps) {
           </div>
           {kycStatus !== null && (
             <div className={`px-4 py-2 rounded-lg text-sm font-medium ${
-              kycStatus === KYC_STATUS.APPROVED
+              kycStatus === true
                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300'
-                : kycStatus === KYC_STATUS.PENDING
-                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'
-                : kycStatus === KYC_STATUS.REJECTED
-                ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
                 : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
             }`}>
-              {getKYCStatusText(kycStatus)}
+              Status: {kycStatus === true ? "Approved" : "Not Submitted/Pending"}
             </div>
           )}
         </div>
@@ -158,20 +163,20 @@ export function CleanKYCUpload({ onKYCSubmitted }: CleanKYCUploadProps) {
         {!canSubmit ? (
           <div className="text-center py-12">
             <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-4 ${
-              kycStatus === KYC_STATUS.PENDING 
-                ? 'bg-amber-100 dark:bg-amber-900' 
+              kycStatus === null
+                ? 'bg-amber-100 dark:bg-amber-900'
                 : 'bg-emerald-100 dark:bg-emerald-900'
             }`}>
               <span className="text-2xl">
-                {kycStatus === KYC_STATUS.PENDING ? "⏳" : "✅"}
+                {!kycStatus ? "⏳" : "✅"}
               </span>
             </div>
             <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">
-              {getKYCStatusText(kycStatus)}
+              {!kycStatus ? "KYC Pending" : "KYC Approved"}
             </h3>
             <p className="text-slate-600 dark:text-slate-400">
-              {kycStatus === KYC_STATUS.PENDING && "Your application is under review. We'll notify you once it's processed."}
-              {kycStatus === KYC_STATUS.APPROVED && "Your KYC is approved! You can now create and fund accrued income."}
+              {!kycStatus && "Your application is under review. We'll notify you once it's processed."}
+              {kycStatus && "Your KYC is approved! You can now create and fund accrued income."}
             </p>
           </div>
         ) : (

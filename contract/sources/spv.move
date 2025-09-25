@@ -90,6 +90,7 @@ module rwfi_addr::spv {
     struct SupplierRegistery has key {
         suppliers: Table<address, Supplier>,
         supplier_count: u64, 
+    supplier_list: vector<address>,
     }
 
     struct Supplier has key, store, copy, drop {
@@ -232,6 +233,7 @@ module rwfi_addr::spv {
         let supplier_reg = SupplierRegistery {
             suppliers: table::new(),
             supplier_count: 0,
+            supplier_list: vector::empty<address>(),
         };
 
         let pool = InvestmentPool {
@@ -416,7 +418,18 @@ module rwfi_addr::spv {
     ) acquires SupplierRegistery{
         let supplier_addr = signer::address_of(supplier);
         let supplier_reg = borrow_global_mut<SupplierRegistery>(@rwfi_addr);
-
+        if(!table::contains(&supplier_reg.suppliers, supplier_addr)){
+            let new_supplier = Supplier {
+                supplier_addr,
+                KYC_APPROVED: false,
+                proof_hash: vector::empty<vector<u8>>(),
+                invoice_id: vector::empty<u64>(),
+            };
+            table::upsert(&mut supplier_reg.suppliers, supplier_addr, new_supplier);
+            supplier_reg.supplier_count = supplier_reg.supplier_count + 1;
+            // Keep a separate list to enable iteration in view functions
+            vector::push_back(&mut supplier_reg.supplier_list, supplier_addr);
+        };
         let profile = table::borrow_mut(&mut supplier_reg.suppliers, supplier_addr);
         
         // Update KYC information
@@ -441,6 +454,8 @@ module rwfi_addr::spv {
             };
             table::upsert(&mut registry.suppliers, supplier_addr, new_supplier);
             registry.supplier_count = registry.supplier_count + 1;
+            // Keep a separate list to enable iteration in view functions
+            vector::push_back(&mut registry.supplier_list, supplier_addr);
         };
     }
 
@@ -851,6 +866,33 @@ module rwfi_addr::spv {
         *table::borrow(&registry.incomes, income_id)
     }
 
+    // Return all incomes for a supplier by reading the supplier's invoice_id vector
+    #[view]
+    public fun get_all_incomes(supplier_addr: address): vector<AccruedIncome> acquires SupplierRegistery, IncomeRegistry {
+        let registry = borrow_global<SupplierRegistery>(@rwfi_addr);
+        assert!(table::contains(&registry.suppliers, supplier_addr), ERROR_SUPPLIER_NOT_FOUND);
+        let profile = table::borrow(&registry.suppliers, supplier_addr);
+
+        let res = vector::empty<AccruedIncome>();
+        let len = vector::length(&profile.invoice_id);
+        let i = 0u64;
+        while (i < len) {
+            let income_id = *vector::borrow(&profile.invoice_id, i);
+            let income = *table::borrow(&borrow_global<IncomeRegistry>(@rwfi_addr).incomes, income_id);
+            vector::push_back(&mut res, income);
+            i = i + 1u64;
+        };
+
+        res
+    }
+
+    #[view]
+    public fun get_document_hashes(supplier_addr: address): vector<vector<u8>> acquires SupplierRegistery {
+        let reg = borrow_global<SupplierRegistery>(@rwfi_addr);
+        let supplier_profile = *table::borrow(&reg.suppliers, supplier_addr);
+        supplier_profile.proof_hash
+    }
+
     #[view]
     public fun get_treasury_address(): address acquires InvestmentPool {
         let pool = borrow_global<InvestmentPool>(@rwfi_addr);
@@ -910,14 +952,28 @@ module rwfi_addr::spv {
     }
 
     // KYC View Functions TODO
-    #[view] 
+    #[view]
     public fun get_all_pending_kyc_suppliers(): vector<Supplier> acquires SupplierRegistery {
         let registry = borrow_global<SupplierRegistery>(@rwfi_addr);
         let pending_suppliers = vector::empty<Supplier>();
-        
-        // Note: Since Move doesn't support table iteration directly, 
-        // this returns an empty vector. In practice, you'd maintain a separate
-        // vector of supplier addresses for iteration
+
+        // Iterate the maintained supplier_list and collect suppliers who have
+        // submitted documents but are not yet approved (pending).
+        let i = 0u64;
+        let len = vector::length(&registry.supplier_list);
+        while (i < len) {
+            let addr = *vector::borrow(&registry.supplier_list, i);
+            if (table::contains(&registry.suppliers, addr)) {
+                let profile = *table::borrow(&registry.suppliers, addr);
+                // Consider pending if documents were submitted (proof_hash non-empty)
+                // and not yet approved
+                if (!profile.KYC_APPROVED && vector::length(&profile.proof_hash) > 0) {
+                    vector::push_back(&mut pending_suppliers, profile);
+                };
+            };
+            i = i + 1u64;
+        };
+
         pending_suppliers
     }
 

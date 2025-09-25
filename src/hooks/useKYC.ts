@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useWallet, type InputTransactionData } from "@aptos-labs/wallet-adapter-react";
-import { aptos, CONTRACT_FUNCTIONS, KYC_STATUS, KYC_LEVEL } from "@/utils/aptosClient";
+import { aptos, CONTRACT_FUNCTIONS, KYC_STATUS, KYC_LEVEL, normalizeAddress } from "@/utils/aptosClient";
 
 // Default gas configuration for KYC transactions
 const KYC_GAS_CONFIG = {
@@ -30,7 +30,7 @@ export function useKYC() {
   const { account, signAndSubmitTransaction } = useWallet();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [kycStatus, setKycStatus] = useState<number | null>(null);
+  const [kycStatus, setKycStatus] = useState<boolean | null>(null);
   const [documentHashes, setDocumentHashes] = useState<string[]>([]);
 
   // Submit KYC documents
@@ -50,7 +50,7 @@ export function useKYC() {
 
       const transaction = createKYCTransaction(
         CONTRACT_FUNCTIONS.SUBMIT_KYC_DOCUMENTS,
-        [hashesAsBytes, kycLevel]
+        [hashesAsBytes, false]
       );
 
       const response = await signAndSubmitTransaction(transaction);
@@ -78,33 +78,26 @@ export function useKYC() {
       setLoading(true);
       setError(null);
 
+      // normalize address to ensure aptos SDK receives a valid hex (0x + up to 64 hex chars)
+      // const addr = normalizeAddress(account.address?.toString());
+      console.log(account.address.toString().length);
       const statusResult = await aptos.view({
         payload: {
           function: CONTRACT_FUNCTIONS.GET_KYC_STATUS,
-          functionArguments: [account.address.toString()],
+          functionArguments: [account.address?.toString()],
         },
       });
 
-      const hashesResult = await aptos.view({
-        payload: {
-          function: CONTRACT_FUNCTIONS.GET_DOCUMENT_HASHES,
-          functionArguments: [account.address.toString()],
-        },
-      });
-
-      if (statusResult && statusResult[0] !== undefined) {
-        setKycStatus(Number(statusResult[0]));
-      }
-
-      if (hashesResult && Array.isArray(hashesResult[0])) {
-        // Convert byte arrays back to strings
-        const hashes = (hashesResult[0] as any[]).map((hashBytes: any) => {
-          if (Array.isArray(hashBytes)) {
-            return new TextDecoder().decode(new Uint8Array(hashBytes));
-          }
-          return String(hashBytes);
-        });
-        setDocumentHashes(hashes);
+      if(statusResult){
+        if(statusResult[0] === true){
+          setKycStatus(true);
+        }
+        else if(statusResult[0] === false){
+          setKycStatus(false);
+        }
+        else{
+          setKycStatus(null);
+        }
       }
     } catch (err) {
       console.error("Error fetching KYC status:", err);
@@ -194,7 +187,38 @@ export function useAdminKYC() {
         },
       });
       
-      return response[0] as any[]; // Array of SupplierKYCInfo structs
+      // The Move view returns a vector<Supplier>; the ts-sdk may wrap the result.
+      // Support both raw arrays and wrapped responses.
+      const raw = Array.isArray(response) && response.length > 0 ? response[0] : response;
+      if (!raw) return [];
+
+      // Each item is expected to be an object with fields matching Supplier
+      const suppliers = (raw as any[]).map((item: any) => {
+        // item.proof_hash is a vector<vector<u8>> -> array of byte arrays
+        const docs: string[] = [];
+        if (Array.isArray(item.proof_hash)) {
+          for (const h of item.proof_hash) {
+            try {
+              const bytes = Array.isArray(h) ? new Uint8Array(h as number[]) : new Uint8Array([]);
+              const decoded = new TextDecoder().decode(bytes);
+              docs.push(decoded || "");
+            } catch (e) {
+              docs.push("");
+            }
+          }
+        }
+
+        return {
+          supplier_address: item.supplier_addr || item.supplier_address || "",
+          approved: !!item.KYC_APPROVED || !!item.kyc_approved || false,
+          proof_hashes: docs,
+          invoice_ids: Array.isArray(item.invoice_id) ? item.invoice_id.map((v: any) => Number(v)) : [],
+          // include raw values for debugging
+          _raw: item,
+        };
+      });
+
+      return suppliers;
     } catch (err) {
       console.error("Error fetching pending KYC applications:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch pending applications";
@@ -218,7 +242,24 @@ export function useAdminKYC() {
         },
       });
       
-      return response[0]; // SupplierKYCInfo struct
+      // response[0] is expected to be vector<vector<u8>> of proof hashes
+      const raw = Array.isArray(response) && response.length > 0 ? response[0] : response;
+      if (!raw) return [];
+
+      const docs: string[] = [];
+      if (Array.isArray(raw)) {
+        for (const h of raw) {
+          try {
+            const bytes = Array.isArray(h) ? new Uint8Array(h as number[]) : new Uint8Array([]);
+            const decoded = new TextDecoder().decode(bytes);
+            docs.push(decoded || "");
+          } catch (e) {
+            docs.push("");
+          }
+        }
+      }
+
+      return docs;
     } catch (err) {
       console.error("Error fetching supplier KYC details:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch supplier details";

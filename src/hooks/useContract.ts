@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useWallet, type InputTransactionData } from "@aptos-labs/wallet-adapter-react";
-import { aptos, CONTRACT_FUNCTIONS } from "@/utils/aptosClient";
+import { aptos, CONTRACT_FUNCTIONS, toOctas, toUnixSec, mapAptosError, normalizeAddress } from "@/utils/aptosClient";
 
 // Default gas configuration for transactions
 const DEFAULT_GAS_CONFIG = {
@@ -12,9 +12,10 @@ const DEFAULT_GAS_CONFIG = {
 
 // Helper function to create transaction with gas configuration
 const createTransactionWithGas = (
-  functionName: `${string}::${string}::${string}`, 
-  functionArguments: any[], 
-  gasConfig = DEFAULT_GAS_CONFIG
+  functionName: `${string}::${string}::${string}`,
+  functionArguments: any[],
+  gasConfig = DEFAULT_GAS_CONFIG,
+  expireSeconds = 300
 ): InputTransactionData => ({
   data: {
     function: functionName,
@@ -23,8 +24,27 @@ const createTransactionWithGas = (
   options: {
     maxGasAmount: gasConfig.maxGasAmount,
     gasUnitPrice: gasConfig.gasUnitPrice,
+    expireTimestamp: Math.floor(Date.now() / 1000) + expireSeconds,
   },
 });
+
+// Centralized tx helper used by hooks to sign, submit and wait
+async function submitTransactionWithWallet(
+  signAndSubmitTransaction: any,
+  tx: InputTransactionData,
+  waitOptions: { timeoutSecs?: number; checkSuccess?: boolean } = { timeoutSecs: 60, checkSuccess: true }
+) {
+  if (!signAndSubmitTransaction) throw new Error("Wallet not available");
+  const response = await signAndSubmitTransaction(tx);
+  try {
+    await aptos.waitForTransaction({ transactionHash: response.hash, options: waitOptions });
+  } catch (e) {
+    // don't fail hard here; return response and the mapped error if any
+    const friendly = mapAptosError(e);
+    throw new Error(`${friendly} (tx: ${response.hash})`);
+  }
+  return response;
+}
 
 // Hook for reading pool statistics
 export function usePoolStats() {
@@ -48,7 +68,7 @@ export function usePoolStats() {
           function: CONTRACT_FUNCTIONS.GET_POOL_STATS,
           functionArguments: [],
         },
-      });
+      }); // no address needed
 
       if (result && Array.isArray(result) && result.length >= 5) {
         setPoolStats({
@@ -106,10 +126,11 @@ export function useInvestorInfo() {
       }
 
       // Get investor epoch info
+      const addr = normalizeAddress(account.address?.toString());
       const epochResult = await aptos.view({
         payload: {
           function: CONTRACT_FUNCTIONS.GET_INVESTOR_EPOCH_INFO,
-          functionArguments: [account.address.toString()],
+          functionArguments: [addr],
         },
       });
 
@@ -117,7 +138,7 @@ export function useInvestorInfo() {
       const detailedResult = await aptos.view({
         payload: {
           function: CONTRACT_FUNCTIONS.GET_INVESTOR_INFO,
-          functionArguments: [account.address.toString()],
+          functionArguments: [addr],
         },
       });
 
@@ -185,14 +206,9 @@ export function useInvestment() {
       setLoading(true);
       setError(null);
 
-      const transaction = createTransactionWithGas(
-        CONTRACT_FUNCTIONS.INVEST_APT,
-        [amount]
-      );
-
-      const response = await signAndSubmitTransaction(transaction);
-      await aptos.waitForTransaction({ transactionHash: response.hash });
-      return response;
+  const transaction = createTransactionWithGas(CONTRACT_FUNCTIONS.INVEST_APT, [amount.toString()]);
+  const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
+  return response;
     } catch (err) {
       console.error("Error investing APT:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to invest APT";
@@ -248,9 +264,8 @@ export function useWithdrawal() {
         },
       };
 
-      const response = await signAndSubmitTransaction(transaction);
-      await aptos.waitForTransaction({ transactionHash: response.hash });
-      return response;
+  const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
+  return response;
     } catch (err) {
       console.error("Error withdrawing returns:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to withdraw returns";
@@ -336,9 +351,8 @@ export function useRiskAssessment() {
         },
       };
 
-      const response = await signAndSubmitTransaction(transaction);
-      await aptos.waitForTransaction({ transactionHash: response.hash });
-      return response;
+  const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
+  return response;
     } catch (err) {
       console.error("Error submitting risk assessment:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to submit risk assessment";
@@ -411,47 +425,18 @@ export function useInvoiceCreation() {
       setError(null);
 
       // Strictly follow MCP guidance: ALWAYS use wallet adapter functions
-      const transaction: InputTransactionData = {
-        data: {
-          function: CONTRACT_FUNCTIONS.CREATE_ACCRUED_INCOME,
-          functionArguments: [
-            amount,
-            dueDateTimestamp.toString(),
-            incomeType.toString(),
-            payerInfo,
-            payerContact,
-            description
-          ],
-        },
-        options: {
-          maxGasAmount: 500000, // High gas for resource creation
-          gasUnitPrice: 100,
-          expireTimestamp: Math.floor(Date.now() / 1000) + 300, // 5 minute expiry for better reliability
-        },
-      };
+      // Ensure values are normalized
+      const amountOctas = typeof amount === 'string' ? amount : toOctas(amount as any);
+      const dueSec = Number(dueDateTimestamp) || toUnixSec(dueDateTimestamp as any);
 
-      console.log("Submitting transaction with options:", transaction.options);
-      console.log("Transaction function:", CONTRACT_FUNCTIONS.CREATE_ACCRUED_INCOME);
-      
-      const response = await signAndSubmitTransaction(transaction);
-      
-      console.log("Transaction submitted successfully:", response.hash);
-      
-      // Wait for confirmation with proper timeout handling
-      try {
-        await aptos.waitForTransaction({ 
-          transactionHash: response.hash,
-          options: {
-            timeoutSecs: 60, // Extended timeout for resource creation
-            checkSuccess: true,
-          }
-        });
-        console.log("Transaction confirmed:", response.hash);
-      } catch (waitError) {
-        console.warn("Transaction may still be processing:", response.hash);
-        // Don't throw here - transaction was submitted successfully
-      }
-      
+      const tx = createTransactionWithGas(
+        CONTRACT_FUNCTIONS.CREATE_ACCRUED_INCOME,
+        [amountOctas.toString(), dueSec.toString(), incomeType.toString(), payerInfo, payerContact, description],
+        { maxGasAmount: 500000, gasUnitPrice: 100 },
+        300
+      );
+
+      const response = await submitTransactionWithWallet(signAndSubmitTransaction, tx, { timeoutSecs: 90, checkSuccess: true });
       return response;
     } catch (err) {
       console.error("Error creating invoice:", err);
@@ -489,7 +474,7 @@ export function useInvoiceCreation() {
 
   const getSupplierInvoices = async (supplierAddress?: string) => {
     try {
-      const addressToCheck = supplierAddress || account?.address?.toString();
+      const addressToCheck = normalizeAddress(supplierAddress || account?.address?.toString());
       if (!addressToCheck) return [];
 
       const result = await aptos.view({
@@ -499,19 +484,33 @@ export function useInvoiceCreation() {
         },
       });
 
-      if (result && Array.isArray(result)) {
-        return result.map((income: any, index: number) => ({
-          id: index,
-          supplierAddr: income.supplier_addr,
+      if (result) {
+        // Normalize result wrapper
+        const anyRes: any = result;
+        const raw = Array.isArray(anyRes) ? anyRes : (anyRes.data || anyRes);
+        // raw should be a vector of incomes
+        return (raw as any[]).map((income: any, index: number) => ({
+          id: index.toString(),
           amount: income.amount?.toString() || "0",
-          fundedAmount: income.funded_amount?.toString() || "0",
-          dueDate: income.due_date?.toString() || "0",
-          incomeType: income.income_type?.toString() || "0",
-          status: income.status?.toString() || "0",
-          description: new TextDecoder().decode(new Uint8Array(income.description || [])),
-          createdAt: income.created_at?.toString() || "0",
-          fundedAt: income.funded_at?.toString() || "0",
-          spvOwned: income.spv_owned || false,
+          due_date: Number(income.due_date?.toString() || "0"),
+          income_type: Number(income.income_type?.toString() || "0"),
+          payer_info: (() => {
+            try {
+              // payer_data.info is stored as bytes (vector<u8>) representing JSON
+              const bytes = Array.isArray(income.payer_data?.info) ? new Uint8Array(income.payer_data.info) : new Uint8Array();
+              return new TextDecoder().decode(bytes) || "";
+            } catch (e) { return ""; }
+          })(),
+          payer_contact: (() => {
+            try {
+              const bytes = Array.isArray(income.payer_data?.contact) ? new Uint8Array(income.payer_data.contact) : new Uint8Array();
+              return new TextDecoder().decode(bytes) || "";
+            } catch (e) { return ""; }
+          })(),
+          description: Array.isArray(income.description) ? new TextDecoder().decode(new Uint8Array(income.description)) : String(income.description || ""),
+          status: Number(income.status?.toString() || "0"),
+          created_at: Number(income.created_at?.toString() || "0"),
+          funded_amount: income.funded_amount?.toString() || "0",
         }));
       }
       return [];
@@ -556,4 +555,33 @@ export function useInvoiceCreation() {
   };
 
   return { createInvoice, getSupplierInvoices, getPendingInvoices, loading, error };
+}
+
+// Admin: fund an accrued income (callable by admin signer)
+export function useAdminFunding() {
+  const { account, signAndSubmitTransaction } = useWallet();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fundAccruedIncome = async (supplierAddress: string, incomeId: string) => {
+    if (!account) throw new Error("Wallet not connected");
+
+    try {
+      setLoading(true);
+      setError(null);
+
+  const tx = createTransactionWithGas(CONTRACT_FUNCTIONS.FUND_ACCRUED_INCOME, [normalizeAddress(supplierAddress), incomeId.toString()], { maxGasAmount: 400000, gasUnitPrice: 100 }, 120);
+      const response = await submitTransactionWithWallet(signAndSubmitTransaction, tx, { timeoutSecs: 120, checkSuccess: true });
+      return response;
+    } catch (err) {
+      console.error("Error funding accrued income:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { fundAccruedIncome, loading, error };
 }

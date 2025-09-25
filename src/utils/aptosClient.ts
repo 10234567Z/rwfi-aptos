@@ -1,6 +1,6 @@
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
 
-export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0xa93465b6d4aa9f0cc3def35d476a6c259ec46320de0377c331c20519aa4eca95";
+export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
 export const APTOS_NETWORK = Network.DEVNET;
 
 // Debug log to check if CONTRACT_ADDRESS is properly loaded
@@ -13,7 +13,7 @@ if (typeof window !== 'undefined') {
 const config = new AptosConfig({
   network: APTOS_NETWORK,
   clientConfig: {
-    API_KEY: process.env.NEXT_PUBLIC_APTOS_API_KEY || "AG-F9SPTCXQX4UW7A4KNMUDJSMZNA92BHS2V",
+    API_KEY: process.env.NEXT_PUBLIC_APTOS_API_KEY,
   },
 });
 
@@ -97,15 +97,54 @@ export const CONTRACT_FUNCTIONS = {
   GET_KYC_STATS: `${CONTRACT_ADDRESS}::spv::get_kyc_stats`,
   
   // Accrued income management functions (updated terminology)
-  CREATE_ACCRUED_INCOME: `${CONTRACT_ADDRESS}::accrued_income_registry::create_accrued_income`,
-  GET_INCOME: `${CONTRACT_ADDRESS}::accrued_income_registry::get_income`,
-  GET_ALL_INCOMES: `${CONTRACT_ADDRESS}::accrued_income_registry::get_all_incomes`,
-  GET_PENDING_INCOMES: `${CONTRACT_ADDRESS}::accrued_income_registry::get_pending_incomes`,
-  GET_REGISTRY_STATS: `${CONTRACT_ADDRESS}::accrued_income_registry::get_registry_stats`,
-  
+  CREATE_ACCRUED_INCOME: `${CONTRACT_ADDRESS}::spv::create_accrued_income`,
+  GET_INCOME: `${CONTRACT_ADDRESS}::spv::get_income`,
+  GET_ALL_INCOMES: `${CONTRACT_ADDRESS}::spv::get_all_incomes`,
+  GET_PENDING_INCOMES: `${CONTRACT_ADDRESS}::spv::get_pending_incomes`,
+  GET_REGISTRY_STATS: `${CONTRACT_ADDRESS}::spv::get_registry_stats`,
+
   // Admin functions
   FUND_ACCRUED_INCOME: `${CONTRACT_ADDRESS}::spv::fund_accrued_income`,
   FUND_ACCRUED_INCOME_WITH_RISK_CHECK: `${CONTRACT_ADDRESS}::spv::fund_accrued_income_with_risk_check`,
   RECORD_INCOME_COLLECTION: `${CONTRACT_ADDRESS}::spv::record_income_collection`,
   CHECK_AND_MARK_DEFAULTS: `${CONTRACT_ADDRESS}::spv::check_and_mark_defaults`,
 } as const;
+
+// Utility helpers
+export function normalizeAddress(addr?: string | null): string {
+  if (!addr) return "";
+  const a = addr.toString().trim();
+  if (a.length === 0) return "";
+  return a.toLowerCase().startsWith("0x") ? a.toLowerCase() : `0x${a.toLowerCase()}`;
+}
+
+export function toOctas(aptAmount: number | string): string {
+  const n = Number(aptAmount || 0);
+  if (!Number.isFinite(n) || isNaN(n)) return "0";
+  return Math.floor(n * 100_000_000).toString();
+}
+
+export function toUnixSec(d: Date | string | number): number {
+  if (d instanceof Date) return Math.floor(d.getTime() / 1000);
+  const n = Number(d);
+  if (!isNaN(n) && n > 1e10) return Math.floor(n / 1000); // milliseconds
+  if (!isNaN(n)) return Math.floor(n); // already seconds
+  const parsed = Date.parse(String(d));
+  return isNaN(parsed) ? 0 : Math.floor(parsed / 1000);
+}
+
+export function mapAptosError(err: any): string {
+  if (!err) return "Unknown error";
+  try {
+    const msg = (err instanceof Error ? err.message : JSON.stringify(err)).toString().toLowerCase();
+    if (msg.includes("simulation failed")) return "Transaction simulation failed. Check inputs.";
+    if (msg.includes("insufficient funds") || msg.includes("insufficient balance")) return "Insufficient APT balance.";
+    if (msg.includes("account sequence number")) return "Sequence number mismatch. Refresh and retry.";
+    if (msg.includes("gas")) return "Gas estimation failed. Try increasing gas.";
+    if (msg.includes("expiration") || msg.includes("expire")) return "Transaction expired or timed out.";
+    // fallback: return original message
+    return err instanceof Error ? err.message : JSON.stringify(err);
+  } catch (e) {
+    return "Unknown Aptos error";
+  }
+}
