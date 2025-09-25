@@ -881,7 +881,7 @@ module rwfi_addr::spv {
             let income_id = *vector::borrow(&profile.invoice_id, i);
             let income = *table::borrow(&borrow_global<IncomeRegistry>(@rwfi_addr).incomes, income_id);
             vector::push_back(&mut res, income);
-            i = i + 1u64;
+            i = i + 1;
         };
 
         res
