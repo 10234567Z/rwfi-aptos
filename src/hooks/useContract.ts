@@ -485,11 +485,8 @@ export function useInvoiceCreation() {
       });
 
       if (result) {
-        // Normalize result wrapper
-        const anyRes: any = result;
-        const raw = Array.isArray(anyRes) ? anyRes : (anyRes.data || anyRes);
         // raw should be a vector of incomes
-        return (raw as any[]).map((income: any, index: number) => ({
+        return (result[0] as any[]).map((income: any, index: number) => ({
           id: index.toString(),
           amount: income.amount?.toString() || "0",
           due_date: Number(income.due_date?.toString() || "0"),

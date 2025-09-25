@@ -144,7 +144,6 @@ export function InvoiceManagement() {
                 <div key={invoice.id} className="bg-gray-300 rounded-lg p-4 border border-gray-700">
                   <div className="flex justify-between items-start mb-3">
                     <div>
-                      <h4 className="text-black font-semibold">{invoice.description}</h4>
                       <p className="text-gray-800 text-sm">
                         Invoice #{invoice.id} • {getIncomeTypeName(invoice.income_type)}
                       </p>
@@ -164,14 +163,6 @@ export function InvoiceManagement() {
                         <div className="text-green-800 text-xs">  
                           Funded: {formatAmount(invoice.funded_amount)} APT
                         </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <span className="text-gray-800">Payer:</span>
-                      <span className="ml-2 text-black">{payer.name}</span>
-                      {payer.email && (
-                        <div className="text-blue-400 text-xs">{payer.email}</div>
                       )}
                     </div>
 
