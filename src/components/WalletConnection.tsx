@@ -23,12 +23,6 @@ export const WalletConnection = () => {
     <div className="flex items-center">
       {connected && account ? (
         <div className="flex items-center space-x-3">
-          <div className="text-sm text-gray-300">
-            <div className="text-xs text-gray-400">Connected</div>
-            <div className="font-mono text-xs">
-              {account.address.toString().slice(0, 6)}...{account.address.toString().slice(-4)}
-            </div>
-          </div>
           <WalletSelector />
         </div>
       ) : (

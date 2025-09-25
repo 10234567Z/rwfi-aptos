@@ -19,12 +19,12 @@ export function AppHeader() {
         <div className="flex justify-between items-center">
           {/* Logo */}
           <Link href="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
-            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-lg">R</span>
+            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-900 rounded-lg flex items-center justify-center">
+              <span className="text-white font-bold text-lg">I</span>
             </div>
             <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                RWAfi Protocol
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-blue-900 bg-clip-text text-transparent">
+                Invera
               </h1>
               <p className="text-xs text-gray-400">Real-World Asset Financing</p>
             </div>
@@ -61,16 +61,6 @@ export function AppHeader() {
               }`}
             >
               Invest
-            </Link>
-            <Link 
-              href="/admin"
-              className={`transition-colors ${
-                isActive("/admin") 
-                  ? "text-blue-400 font-medium" 
-                  : "text-gray-300 hover:text-white"
-              }`}
-            >
-              Admin
             </Link>
           </nav>
 
@@ -110,16 +100,6 @@ export function AppHeader() {
                   }`}
                 >
                   Invest
-                </Link>
-                <Link 
-                  href="/admin"
-                  className={`block py-2 px-3 rounded transition-colors ${
-                    isActive("/admin") 
-                      ? "text-blue-400 bg-blue-900/20" 
-                      : "text-gray-300 hover:text-white hover:bg-gray-800"
-                  }`}
-                >
-                  Admin
                 </Link>
               </div>
             </details>

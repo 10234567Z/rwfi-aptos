@@ -28,11 +28,11 @@ export function InvoiceManagement() {
 
   const getStatusColor = (status: number) => {
     switch (status) {
-      case INCOME_STATUS.PENDING: return "text-yellow-400 bg-yellow-400/10";
-      case INCOME_STATUS.FUNDED: return "text-green-400 bg-green-400/10";
-      case INCOME_STATUS.CANCELLED: return "text-red-400 bg-red-400/10";
-      case INCOME_STATUS.COLLECTED: return "text-purple-400 bg-purple-400/10";
-      default: return "text-gray-400 bg-gray-400/10";
+      case INCOME_STATUS.PENDING: return "text-yellow-800";
+      case INCOME_STATUS.FUNDED: return "text-green-800";
+      case INCOME_STATUS.CANCELLED: return "text-red-800";
+      case INCOME_STATUS.COLLECTED: return "text-purple-800";
+      default: return "text-gray-800";
     }
   };
 
@@ -102,7 +102,7 @@ export function InvoiceManagement() {
 
   if (!account) {
     return (
-      <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
+      <Card className="bg-gray-200 border-gray-700 backdrop-blur-sm">
         <CardContent className="p-6 text-center">
           <p className="text-gray-400">Connect your wallet to view your invoices</p>
         </CardContent>
@@ -111,15 +111,15 @@ export function InvoiceManagement() {
   }
 
   return (
-    <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
+    <Card className="bg-gray-200 border-gray-700 backdrop-blur-sm">
       <CardHeader>
-        <CardTitle className="text-white flex items-center">
-          <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg flex items-center justify-center mr-3">
+        <CardTitle className="text-black flex items-center">
+          <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-blue-900 rounded-lg flex items-center justify-center mr-3">
             📋
           </div>
           Your Invoices
         </CardTitle>
-        <CardDescription className="text-gray-400">
+        <CardDescription className="text-gray-800">
           Manage and track your submitted invoices and their funding status
         </CardDescription>
       </CardHeader>
@@ -127,12 +127,12 @@ export function InvoiceManagement() {
       <CardContent>
         {loading ? (
           <div className="text-center py-8">
-            <p className="text-gray-400">Loading your invoices...</p>
+            <p className="text-gray-800">Loading your invoices...</p>
           </div>
         ) : invoices.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-400 mb-4">No invoices found</p>
-            <p className="text-sm text-gray-500">Create your first invoice to get started</p>
+            <p className="text-gray-800 mb-4">No invoices found</p>
+            <p className="text-sm text-gray-900">Create your first invoice to get started</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -141,11 +141,11 @@ export function InvoiceManagement() {
               const statusColor = getStatusColor(invoice.status);
               
               return (
-                <div key={invoice.id} className="bg-gray-800/30 rounded-lg p-4 border border-gray-700">
+                <div key={invoice.id} className="bg-gray-300 rounded-lg p-4 border border-gray-700">
                   <div className="flex justify-between items-start mb-3">
                     <div>
-                      <h4 className="text-white font-semibold">{invoice.description}</h4>
-                      <p className="text-gray-400 text-sm">
+                      <h4 className="text-black font-semibold">{invoice.description}</h4>
+                      <p className="text-gray-800 text-sm">
                         Invoice #{invoice.id} • {getIncomeTypeName(invoice.income_type)}
                       </p>
                     </div>
@@ -156,36 +156,36 @@ export function InvoiceManagement() {
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                     <div>
-                      <span className="text-gray-400">Amount:</span>
-                      <span className="ml-2 text-white font-semibold">
+                      <span className="text-gray-800">Amount:</span>
+                      <span className="ml-2 text-black font-semibold">
                         {formatAmount(invoice.amount)} APT
                       </span>
                       {invoice.funded_amount && (
-                        <div className="text-green-400 text-xs">
+                        <div className="text-green-800 text-xs">  
                           Funded: {formatAmount(invoice.funded_amount)} APT
                         </div>
                       )}
                     </div>
 
                     <div>
-                      <span className="text-gray-400">Payer:</span>
-                      <span className="ml-2 text-white">{payer.name}</span>
+                      <span className="text-gray-800">Payer:</span>
+                      <span className="ml-2 text-black">{payer.name}</span>
                       {payer.email && (
                         <div className="text-blue-400 text-xs">{payer.email}</div>
                       )}
                     </div>
 
                     <div>
-                      <span className="text-gray-400">Due Date:</span>
-                      <span className="ml-2 text-white">{formatDate(invoice.due_date)}</span>
-                      <div className="text-yellow-400 text-xs">
+                      <span className="text-gray-800">Due Date:</span>
+                      <span className="ml-2 text-black">{formatDate(invoice.due_date)}</span>
+                      <div className="text-yellow-800 text-xs">
                         {formatDaysUntilDue(invoice.due_date)}
                       </div>
                     </div>
                   </div>
 
                   <div className="mt-3 pt-3 border-t border-gray-700 flex justify-between items-center">
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-gray-900">
                       Created: {formatDate(invoice.created_at)}
                     </div>
                     
@@ -194,7 +194,7 @@ export function InvoiceManagement() {
                         <Button 
                           size="sm" 
                           variant="outline"
-                          className="text-xs bg-yellow-600/20 border-yellow-600 text-yellow-400 hover:bg-yellow-600/30"
+                          className="text-xs bg-yellow-600/20 border-yellow-600 text-yellow-800 hover:bg-yellow-600/30"
                         >
                           Under Review
                         </Button>
@@ -214,7 +214,7 @@ export function InvoiceManagement() {
                         <Button 
                           size="sm" 
                           variant="outline"
-                          className="text-xs bg-purple-600/20 border-purple-600 text-purple-400 hover:bg-purple-600/30"
+                          className="text-xs bg-blue-600/20 border-blue-600 text-blue-400 hover:bg-blue-600/30"
                         >
                           Completed
                         </Button>
@@ -230,17 +230,17 @@ export function InvoiceManagement() {
         {/* Summary Stats */}
         {invoices.length > 0 && (
           <div className="mt-6 pt-6 border-t border-gray-700">
-            <h4 className="text-white font-semibold mb-3">Summary</h4>
+            <h4 className="text-black font-semibold mb-3">Summary</h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div className="bg-gray-800/30 rounded p-3 text-center">
-                <div className="text-white font-semibold">
+                <div className="text-black font-semibold">
                   {invoices.length}
                 </div>
-                <div className="text-gray-400 text-xs">Total Invoices</div>
+                <div className="text-gray-800 text-xs">Total Invoices</div>
               </div>
               
               <div className="bg-gray-800/30 rounded p-3 text-center">
-                <div className="text-green-400 font-semibold">
+                <div className="text-green-800 font-semibold">
                   {formatAmount(
                     invoices
                       .filter(inv => inv.status === INCOME_STATUS.FUNDED)
@@ -248,18 +248,18 @@ export function InvoiceManagement() {
                       .toString()
                   )} APT
                 </div>
-                <div className="text-gray-400 text-xs">Funded Amount</div>
+                <div className="text-gray-800 text-xs">Funded Amount</div>
               </div>
 
               <div className="bg-gray-800/30 rounded p-3 text-center">
-                <div className="text-yellow-400 font-semibold">
+                <div className="text-yellow-800 font-semibold">
                   {invoices.filter(inv => inv.status === INCOME_STATUS.PENDING).length}
                 </div>
-                <div className="text-gray-400 text-xs">Pending Review</div>
+                <div className="text-gray-800 text-xs">Pending Review</div>
               </div>
 
-              <div className="bg-gray-800/30 rounded p-3 text-center">
-                <div className="text-blue-400 font-semibold">
+              <div className="bg-gray-300 rounded p-3 text-center">
+                <div className="text-blue-800 font-semibold">
                   {formatAmount(
                     invoices
                       .filter(inv => inv.status === INCOME_STATUS.PENDING)
@@ -267,7 +267,7 @@ export function InvoiceManagement() {
                       .toString()
                   )} APT
                 </div>
-                <div className="text-gray-400 text-xs">Pending Value</div>
+                <div className="text-gray-800 text-xs">Pending Value</div>
               </div>
             </div>
           </div>
