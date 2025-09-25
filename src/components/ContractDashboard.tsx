@@ -13,7 +13,6 @@ import {
   useWithdrawal,
   useCurrentEpoch,
 } from "@/hooks/useContract";
-import { PoolStats } from "@/components/PoolStats";
 
 export function ContractDashboard() {
   const { account } = useWallet();
@@ -23,7 +22,6 @@ export function ContractDashboard() {
 
   // Contract hooks
   const { investorInfo, availableReturns, aptBalance, refetch: refetchInvestor } = useInvestorInfo();
-  const { currentEpoch, loading: epochLoading, refetch: refetchEpoch } = useCurrentEpoch();
   const { investApt, loading: investLoading } = useInvestment();
   const { withdrawReturns, loading: withdrawLoading } = useWithdrawal();
 
@@ -108,38 +106,6 @@ export function ContractDashboard() {
 
   return (
     <div className="space-y-8">
-      {/* Dashboard Header */}
-      <div className="text-center">
-        <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-          Investment Dashboard
-        </h2>
-        <p className="text-gray-400">Manage your RWAfi investments and track returns</p>
-      </div>
-
-      {/* Pool Statistics */}
-      <div>
-        <h3 className="text-xl font-semibold text-white mb-4">Pool Statistics</h3>
-        <PoolStats />
-      </div>
-
-      {/* Current Epoch */}
-      <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
-        <CardHeader>
-          <CardTitle className="text-white">Current Epoch</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {epochLoading ? (
-            <p className="text-gray-400">Loading...</p>
-          ) : (
-            <div className="flex items-center justify-between">
-              <span className="text-2xl font-bold text-white">{currentEpoch || "0"}</span>
-              <Button variant="outline" size="sm" onClick={refetchEpoch} className="border-gray-600 text-gray-300 bg-gray-800/50">
-                Refresh
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Your Portfolio */}
       <Card className="bg-gray-900/50 border-gray-700 backdrop-blur-sm">
@@ -152,10 +118,6 @@ export function ContractDashboard() {
             <div className="bg-gray-800/50 rounded-lg p-4">
               <p className="text-sm text-gray-400 mb-1">APT Balance</p>
               <p className="text-2xl font-bold text-white">{formatAmount(aptBalance)} APT</p>
-            </div>
-            <div className="bg-gray-800/50 rounded-lg p-4">
-              <p className="text-sm text-gray-400 mb-1">INV Tokens</p>
-              <p className="text-2xl font-bold text-blue-400">{formatAmount(investorInfo?.invTokens || "0")} INV</p>
             </div>
             <div className="bg-gray-800/50 rounded-lg p-4">
               <p className="text-sm text-gray-400 mb-1">Available Returns</p>

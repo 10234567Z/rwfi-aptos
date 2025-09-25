@@ -819,6 +819,7 @@ module rwfi_addr::spv {
             let excess = final_withdrawal_amount - pool_mut.total_collections;
             pool_mut.total_collections = 0;
             pool_mut.total_apt_invested = pool_mut.total_apt_invested - excess;
+            pool_mut.available_for_funding = pool_mut.available_for_funding - excess;
         };
         
         // Update investor data
