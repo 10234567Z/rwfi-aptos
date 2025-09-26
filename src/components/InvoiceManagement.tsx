@@ -144,6 +144,7 @@ export function InvoiceManagement() {
                 <div key={invoice.id} className="bg-gray-300 rounded-lg p-4 border border-gray-700">
                   <div className="flex justify-between items-start mb-3">
                     <div>
+                      <h4 className="text-black font-semibold">{invoice.description}</h4>
                       <p className="text-gray-800 text-sm">
                         Invoice #{invoice.id} • {getIncomeTypeName(invoice.income_type)}
                       </p>
@@ -195,7 +196,7 @@ export function InvoiceManagement() {
                         <Button 
                           size="sm" 
                           variant="outline"
-                          className="text-xs bg-blue-600/20 border-blue-600 text-blue-400 hover:bg-blue-600/30"
+                          className="text-xs bg-blue-600/20 border-blue-600 text-blue-800 hover:bg-blue-600/30"
                         >
                           View Details
                         </Button>
@@ -205,7 +206,7 @@ export function InvoiceManagement() {
                         <Button 
                           size="sm" 
                           variant="outline"
-                          className="text-xs bg-blue-600/20 border-blue-600 text-blue-400 hover:bg-blue-600/30"
+                          className="text-xs bg-blue-600/20 border-blue-600 text-blue-800 hover:bg-blue-600/30"
                         >
                           Completed
                         </Button>
@@ -230,17 +231,6 @@ export function InvoiceManagement() {
                 <div className="text-gray-800 text-xs">Total Invoices</div>
               </div>
               
-              <div className="bg-gray-800/30 rounded p-3 text-center">
-                <div className="text-green-800 font-semibold">
-                  {formatAmount(
-                    invoices
-                      .filter(inv => inv.status === INCOME_STATUS.FUNDED)
-                      .reduce((sum, inv) => sum + parseInt(inv.funded_amount || "0"), 0)
-                      .toString()
-                  )} APT
-                </div>
-                <div className="text-gray-800 text-xs">Funded Amount</div>
-              </div>
 
               <div className="bg-gray-800/30 rounded p-3 text-center">
                 <div className="text-yellow-800 font-semibold">
