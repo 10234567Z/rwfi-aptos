@@ -97,13 +97,7 @@ export function usePoolStats() {
 // Hook for reading investor information
 export function useInvestorInfo() {
   const { account } = useWallet();
-  const [investorInfo, setInvestorInfo] = useState<{
-    joinEpoch: string;
-    lastClaimEpoch: string;
-    totalInvested: string;
-    totalWithdrawn: string;
-    invTokens: string;
-  } | null>(null);
+  const [investorInfo, setInvestorInfo] = useState<any>(null);
   const [availableReturns, setAvailableReturns] = useState<string | null>(null);
   const [aptBalance, setAptBalance] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,50 +119,30 @@ export function useInvestorInfo() {
         setAptBalance("0");
       }
 
-      // Get investor epoch info
-      const addr = normalizeAddress(account.address?.toString());
-      const epochResult = await aptos.view({
-        payload: {
-          function: CONTRACT_FUNCTIONS.GET_INVESTOR_EPOCH_INFO,
-          functionArguments: [addr],
-        },
-      });
-
-      // Get detailed investor info
-      const detailedResult = await aptos.view({
-        payload: {
-          function: CONTRACT_FUNCTIONS.GET_INVESTOR_INFO,
-          functionArguments: [addr],
-        },
-      });
-
-      if (epochResult && Array.isArray(epochResult) && epochResult.length >= 2 &&
-          detailedResult && Array.isArray(detailedResult) && detailedResult.length >= 5) {
-        setInvestorInfo({
-          joinEpoch: epochResult[0]?.toString() || "0",
-          lastClaimEpoch: epochResult[1]?.toString() || "0",
-          totalInvested: detailedResult[1]?.toString() || "0",
-          totalWithdrawn: detailedResult[2]?.toString() || "0",
-          invTokens: detailedResult[3]?.toString() || "0",
+      try {
+        const investor_info = await aptos.view({
+          payload: {
+            function: CONTRACT_FUNCTIONS.GET_INVESTOR_INFO,
+            functionArguments: [account.address.toString()],
+          },
         });
+        setInvestorInfo(investor_info[1]);
+      } catch (error) {
+        console.log("Failed to get investor info:", error);
       }
 
-      // Get total withdrawable amount using all their INV tokens
-      // const invTokens = detailedResult && detailedResult[4] ? detailedResult[4].toString() : "0";
-      
-      // Use the simpler available returns calculation for now
       try {
         const withdrawableResult = await aptos.view({
           payload: {
             function: CONTRACT_FUNCTIONS.CALCULATE_AVAILABLE_RETURNS,
-            functionArguments: [account.address.toString()],
+            functionArguments: [account.address.toString(), ],
           },
         });
 
         if (withdrawableResult && withdrawableResult[0] !== undefined) {
           setAvailableReturns(withdrawableResult[0]!.toString());
         } else {
-          setAvailableReturns("0");
+          setAvailableReturns("0"); 
         }
       } catch (calcError) {
         console.log("Failed to calculate withdrawable amount, setting to 0:", calcError);

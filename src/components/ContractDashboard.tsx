@@ -25,6 +25,8 @@ export function ContractDashboard() {
   const { investApt, loading: investLoading } = useInvestment();
   const { withdrawReturns, loading: withdrawLoading } = useWithdrawal();
 
+  console.log("Investor Info:", investorInfo);
+
   const handleInvest = async () => {
     if (!investAmount || isNaN(Number(investAmount))) {
       toast({
@@ -118,6 +120,10 @@ export function ContractDashboard() {
             <div className="bg-gray-800/50 rounded-lg p-4">
               <p className="text-sm text-gray-400 mb-1">APT Balance</p>
               <p className="text-2xl font-bold text-white">{formatAmount(aptBalance)} APT</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-4">
+              <p className="text-sm text-gray-400 mb-1">APT Invested</p>
+              <p className="text-2xl font-bold text-white">{formatAmount(investorInfo)} APT</p>
             </div>
             <div className="bg-gray-800/50 rounded-lg p-4">
               <p className="text-sm text-gray-400 mb-1">Available Returns</p>
