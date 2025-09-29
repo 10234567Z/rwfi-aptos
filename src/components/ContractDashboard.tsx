@@ -118,15 +118,15 @@ export function ContractDashboard() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-gray-800/50 rounded-lg p-4">
-              <p className="text-sm text-gray-400 mb-1">APT Balance</p>
+              <p className="text-sm text-gray-400 mb-1">Wallet Balance</p>
               <p className="text-2xl font-bold text-white">{formatAmount(aptBalance)} APT</p>
             </div>
             <div className="bg-gray-800/50 rounded-lg p-4">
-              <p className="text-sm text-gray-400 mb-1">APT Invested</p>
+              <p className="text-sm text-gray-400 mb-1">Total APT Invested</p>
               <p className="text-2xl font-bold text-white">{formatAmount(investorInfo)} APT</p>
             </div>
             <div className="bg-gray-800/50 rounded-lg p-4">
-              <p className="text-sm text-gray-400 mb-1">Available Returns</p>
+              <p className="text-sm text-gray-400 mb-1">Available Withdrawal</p>
               <p className="text-2xl font-bold text-green-400">{formatAmount(availableReturns)} APT</p>
             </div>
           </div>

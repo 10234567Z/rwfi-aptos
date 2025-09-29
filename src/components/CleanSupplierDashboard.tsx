@@ -29,16 +29,6 @@ export function CleanSupplierDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
       <div className="max-w-6xl mx-auto p-6 space-y-8">
-        {/* Clean Header */}
-        <div className="text-center py-8">
-          <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
-            Supplier Dashboard
-          </h1>
-          <p className="text-slate-600 dark:text-slate-400 text-lg">
-            Get funding for your accrued income in 3 simple steps
-          </p>
-        </div>
-
         {/* Progress Steps - Clean Design */}
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-8">
           <div className="flex items-center justify-between max-w-2xl mx-auto">

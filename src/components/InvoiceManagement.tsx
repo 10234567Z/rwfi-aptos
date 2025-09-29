@@ -198,7 +198,7 @@ export function InvoiceManagement() {
                           variant="outline"
                           className="text-xs bg-blue-600/20 border-blue-600 text-blue-800 hover:bg-blue-600/30"
                         >
-                          View Details
+                          FUNDED
                         </Button>
                       )}
                       

@@ -10,9 +10,9 @@ import { AppHeader } from "@/components/AppHeader";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "RWAfi Protocol - Real-World Asset Financing",
+  title: "Invera - Real-World Asset Financing",
   description: "Decentralized accrued income financing platform on Aptos blockchain",
-  applicationName: "RWAfi",
+  applicationName: "Invera",
   manifest: "/manifest.json",
 };
 
