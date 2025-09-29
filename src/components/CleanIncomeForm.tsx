@@ -8,7 +8,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useInvoiceCreation } from "@/hooks/useContract";
 import { useKYC } from "@/hooks/useKYC";
-import { INCOME_TYPES, KYC_STATUS, toOctas, toUnixSec } from "@/utils/aptosClient";
+import { INCOME_TYPES, toOctas, toUnixSec } from "@/utils/aptosClient";
 
 interface CleanIncomeFormProps {
   onIncomeCreated?: () => void;
