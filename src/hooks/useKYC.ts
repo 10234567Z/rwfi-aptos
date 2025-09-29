@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useWallet, type InputTransactionData } from "@aptos-labs/wallet-adapter-react";
-import { aptos, CONTRACT_FUNCTIONS, KYC_STATUS, KYC_LEVEL, normalizeAddress } from "@/utils/aptosClient";
+import { aptos, CONTRACT_FUNCTIONS, KYC_STATUS} from "@/utils/aptosClient";
 
 // Default gas configuration for KYC transactions
 const KYC_GAS_CONFIG = {
@@ -31,10 +31,9 @@ export function useKYC() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [kycStatus, setKycStatus] = useState<boolean | null>(null);
-  const [documentHashes, setDocumentHashes] = useState<string[]>([]);
 
   // Submit KYC documents
-  const submitKYCDocuments = async (documentHashes: string[], kycLevel: number = KYC_LEVEL.BASIC) => {
+  const submitKYCDocuments = async (documentHashes: string[]) => {
     if (!account) {
       throw new Error("Wallet not connected");
     }
@@ -162,7 +161,6 @@ export function useKYC() {
     getKYCStatusText,
     getKYCStatusColor,
     kycStatus,
-    documentHashes,
     loading,
     error,
   };

@@ -78,14 +78,6 @@ export function InvoiceManagement() {
     }
   };
 
-  const parsePayer = (payerInfo: string) => {
-    try {
-      return JSON.parse(payerInfo);
-    } catch {
-      return { name: payerInfo };
-    }
-  };
-
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -137,7 +129,6 @@ export function InvoiceManagement() {
         ) : (
           <div className="space-y-4">
             {invoices.map((invoice) => {
-              const payer = parsePayer(invoice.payer_info);
               const statusColor = getStatusColor(invoice.status);
               
               return (

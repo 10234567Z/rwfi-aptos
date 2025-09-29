@@ -11,7 +11,6 @@ import {
   useInvestment,
   useInvestorInfo,
   useWithdrawal,
-  useCurrentEpoch,
 } from "@/hooks/useContract";
 
 export function ContractDashboard() {

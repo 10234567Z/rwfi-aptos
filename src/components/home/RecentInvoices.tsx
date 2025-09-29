@@ -5,16 +5,6 @@ import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useInvoiceCreation } from "@/hooks/useContract";
 
-function decodeBytesToString(bytes: any) {
-  try {
-    if (!bytes) return "";
-    const arr = Array.isArray(bytes) ? new Uint8Array(bytes) : new Uint8Array(bytes);
-    return new TextDecoder().decode(arr);
-  } catch (e) {
-    return String(bytes);
-  }
-}
-
 export function RecentInvoices() {
   const { account } = useWallet();
   const { getSupplierInvoices } = useInvoiceCreation();

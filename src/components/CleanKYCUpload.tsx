@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useKYC } from "@/hooks/useKYC";
-import { KYC_LEVEL, KYC_STATUS } from "@/utils/aptosClient";
+import { KYC_LEVEL } from "@/utils/aptosClient";
 import { uploadMultipleToIPFS } from "@/utils/ipfsService";
 
 interface CleanKYCUploadProps {
@@ -14,7 +14,7 @@ interface CleanKYCUploadProps {
 
 export function CleanKYCUpload({ onKYCSubmitted }: CleanKYCUploadProps) {
   const { toast } = useToast();
-  const { submitKYCDocuments, kycStatus, getKYCStatusText, loading } = useKYC();
+  const { submitKYCDocuments, kycStatus, loading } = useKYC();
   
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [kycLevel, setKycLevel] = useState<number>(KYC_LEVEL.BASIC);
@@ -97,7 +97,7 @@ export function CleanKYCUpload({ onKYCSubmitted }: CleanKYCUploadProps) {
       });
 
       // Submit to blockchain
-      await submitKYCDocuments(ipfsHashes, kycLevel);
+      await submitKYCDocuments(ipfsHashes);
 
       toast({
         title: "KYC Documents Submitted",
