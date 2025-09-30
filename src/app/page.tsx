@@ -8,6 +8,7 @@ import { ProcessSteps } from "@/components/home/ProcessSteps";
 import { InvestorExtras } from "@/components/home/InvestorExtras";
 import InvestorFlow from "@/components/home/InvestorFlow";
 import { ProjectedReturns } from "@/components/home/ProjectedReturns";
+import { ShieldCheck, BanknoteIcon as BankIcon } from "lucide-react";
 
 export default function HomePage() {
   const [view, setView] = useState<'supplier' | 'investor'>('supplier');
@@ -114,6 +115,55 @@ export default function HomePage() {
                   <Button size="lg" className="bg-gradient-to-r from-blue-600 to-blue-900 text-white border-0 px-8 py-3 text-lg">Start Investing</Button>
                 </Link>
               )}
+            </div>
+
+
+            <div>
+              <div className="mt-8">
+                <div className="flex flex-col gap-6 mt-6">
+                  {/* SPV / Insurance Card - polished */}
+                  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/60 to-slate-50 dark:from-slate-800/60 dark:to-slate-800 border border-slate-200 dark:border-slate-700 p-6 shadow-lg transition-transform hover:-translate-y-1 hover:shadow-2xl">
+                    <div className="absolute -right-16 -top-10 opacity-20 transform rotate-45 w-44 h-44 bg-gradient-to-br from-indigo-300 to-violet-400 blur-3xl" />
+                    <div className="flex items-start gap-4">
+                      <div className="p-3 rounded-lg bg-white dark:bg-slate-900/60 shadow-sm">
+                        <ShieldCheck className="w-8 h-8 text-indigo-600" />
+                      </div>
+                      <div>
+                        <h4 className="text-lg font-semibold text-black">SPV-backed Custody</h4>
+                        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Legal segregation of funded invoices into SPVs with an insurance overlay to protect investors against defined credit events.</p>
+                      </div>
+                    </div>
+
+                    <ul className="mt-4 text-sm text-gray-500 dark:text-gray-400 space-y-2">
+                      <li>Ring-fenced capital per SPV — no commingling with operations.</li>
+                      <li>Insurance coverage for eligible credit losses (policy terms apply).</li>
+                      <li>Independent trustee & periodic audit reports for full transparency.</li>
+                    </ul>
+                  </div>
+
+                  {/* Bank Partner / Settlement Card - polished */}
+                  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/60 to-slate-50 dark:from-slate-800/60 dark:to-slate-800 border border-slate-200 dark:border-slate-700 p-6 shadow-lg transition-transform hover:-translate-y-1 hover:shadow-2xl">
+                    <div className="absolute -left-14 -bottom-10 opacity-20 transform -rotate-12 w-44 h-44 bg-gradient-to-br from-emerald-200 to-emerald-400 blur-3xl" />
+                    <div className="flex items-start gap-4">
+                      <div className="p-3 rounded-lg bg-white dark:bg-slate-900/60 shadow-sm">
+                        <BankIcon className="w-8 h-8 text-emerald-600" />
+                      </div>
+                      <div>
+                        <h4 className="text-lg font-semibold text-black">Bank Partnerships & Settlement</h4>
+                        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Settlement rails and partner guarantees handled by licensed banks to reduce counterparty and settlement risk.</p>
+                      </div>
+                    </div>
+
+                    <ul className="mt-4 text-sm text-gray-500 dark:text-gray-400 space-y-2">
+                      <li>Licensed on/off-ramps for fiat settlement and payouts.</li>
+                      <li>Partner-provided backup settlement facilities and reconciliation.</li>
+                      <li>Robust AML/KYC and reconciliation processes to maintain flow integrity.</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">We combine legal structures, insurance overlays and regulated banking to deliver predictable investor outcomes and secure supplier payouts.</div>
+              </div>
             </div>
           </div>
         </div>
