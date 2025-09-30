@@ -102,6 +102,7 @@ export function useInvestorInfo() {
   const [aptBalance, setAptBalance] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [totalWithdrawn, setTotalWithdrawn] = useState<string | null>(null);
 
   const fetchInvestorInfo = async () => {
     if (!account?.address) return;
@@ -127,6 +128,9 @@ export function useInvestorInfo() {
           },
         });
         setInvestorInfo(investor_info[1]);
+        const val1 = investor_info[1] != null ? Number(investor_info[1]) : 0;
+        const val3 = investor_info[3] != null ? Number(investor_info[3]) : 0;
+        setTotalWithdrawn((val1 - val3).toString());
       } catch (error) {
         console.log("Failed to get investor info:", error);
       }
@@ -162,7 +166,7 @@ export function useInvestorInfo() {
     }
   }, [account?.address]);
 
-  return { investorInfo, availableReturns, aptBalance, loading, error, refetch: fetchInvestorInfo };
+  return { investorInfo, availableReturns, aptBalance, loading, error, totalWithdrawn, refetch: fetchInvestorInfo };
 }
 
 // Hook for investment transactions

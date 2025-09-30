@@ -20,7 +20,7 @@ export function ContractDashboard() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
   // Contract hooks
-  const { investorInfo, availableReturns, aptBalance, refetch: refetchInvestor } = useInvestorInfo();
+  const { investorInfo, availableReturns, totalWithdrawn, refetch: refetchInvestor } = useInvestorInfo();
   const { investApt, loading: investLoading } = useInvestment();
   const { withdrawReturns, loading: withdrawLoading } = useWithdrawal();
 
@@ -39,12 +39,12 @@ export function ContractDashboard() {
     try {
       const amountInOctas = (Number(investAmount) * 100_000_000).toString();
       await investApt(amountInOctas);
-      
+
       toast({
         title: "Investment Successful",
         description: `Successfully invested ${investAmount} APT`,
       });
-      
+
       setInvestAmount("");
       refetchInvestor();
     } catch (error) {
@@ -69,12 +69,12 @@ export function ContractDashboard() {
     try {
       const amountInTokens = (Number(withdrawAmount) * 100_000_000).toString();
       await withdrawReturns(amountInTokens, true);
-      
+
       toast({
         title: "Withdrawal Successful",
         description: `Successfully withdrew ${withdrawAmount} tokens`,
       });
-      
+
       setWithdrawAmount("");
       refetchInvestor();
     } catch (error) {
@@ -117,12 +117,12 @@ export function ContractDashboard() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-gray-800/50 rounded-lg p-4">
-              <p className="text-sm text-gray-400 mb-1">Wallet Balance</p>
-              <p className="text-2xl font-bold text-white">{formatAmount(aptBalance)} APT</p>
-            </div>
-            <div className="bg-gray-800/50 rounded-lg p-4">
               <p className="text-sm text-gray-400 mb-1">Total APT Invested</p>
               <p className="text-2xl font-bold text-white">{formatAmount(investorInfo)} APT</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-4">
+              <p className="text-sm text-gray-400 mb-1">Total Withdrawn</p>
+              <p className="text-2xl font-bold text-white">{formatAmount(totalWithdrawn)} APT</p>
             </div>
             <div className="bg-gray-800/50 rounded-lg p-4">
               <p className="text-sm text-gray-400 mb-1">Available Withdrawal</p>
@@ -156,8 +156,8 @@ export function ContractDashboard() {
                 Minimum investment: 1 APT
               </p>
             </div>
-            <Button 
-              onClick={handleInvest} 
+            <Button
+              onClick={handleInvest}
               disabled={investLoading || !investAmount}
               className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white"
             >
@@ -188,8 +188,8 @@ export function ContractDashboard() {
                 Available: {formatAmount(investorInfo?.invTokens || "0")} INV tokens
               </p>
             </div>
-            <Button 
-              onClick={handleWithdraw} 
+            <Button
+              onClick={handleWithdraw}
               disabled={withdrawLoading || !withdrawAmount}
               className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white"
             >
