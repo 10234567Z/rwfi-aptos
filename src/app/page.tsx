@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { KPIGrid } from "@/components/home/KPIGrid";
 import { ProcessSteps } from "@/components/home/ProcessSteps";
 import { InvestorExtras } from "@/components/home/InvestorExtras";
+import InvestorFlow from "@/components/home/InvestorFlow";
 import { ProjectedReturns } from "@/components/home/ProjectedReturns";
 
 export default function HomePage() {
@@ -89,6 +90,11 @@ export default function HomePage() {
                     <>
                       {/* Extended investor-only panel */}
                       <InvestorExtras />
+
+                      {/* Flowchart showing how investors earn the fixed yield */}
+                      <div className="my-6">
+                        <InvestorFlow />
+                      </div>
 
                       {/* Projected returns (UI-only, illustrative) */}
                       <ProjectedReturns rate={0.10} />
