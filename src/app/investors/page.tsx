@@ -16,7 +16,6 @@ export default function InvestorsPage() {
           </p>
         </div>
         <div className="space-y-6">
-          <WithdrawalGateStatus />
           <ContractDashboard />
         </div>
       </div>

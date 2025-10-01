@@ -20,7 +20,7 @@ export function ContractDashboard() {
   const [withdrawAmount, setWithdrawAmount] = useState("");
 
   // Contract hooks
-  const { investorInfo, availableReturns, totalWithdrawn, refetch: refetchInvestor , invTokens} = useInvestorInfo();
+  const { investorInfo, availableReturns, totalWithdrawn, refetch: refetchInvestor, invTokens } = useInvestorInfo();
   const { investApt, loading: investLoading } = useInvestment();
   const { withdrawReturns, loading: withdrawLoading } = useWithdrawal();
 
@@ -124,7 +124,10 @@ export function ContractDashboard() {
               <p className="text-sm text-gray-400 mb-1">Total Withdrawn</p>
               <p className="text-2xl font-bold text-white">{formatAmount(totalWithdrawn)} APT</p>
             </div>
-
+            <div className="bg-gray-800/50 rounded-lg p-4">
+              <p className="text-sm text-gray-400 mb-1">Available Returns</p>
+              <p className="text-2xl font-bold text-white">{formatAmount(availableReturns)} APT</p>
+            </div>
           </div>
         </CardContent>
       </Card>
