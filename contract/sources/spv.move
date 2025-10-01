@@ -103,6 +103,9 @@ module rwfi_addr::spv {
 
     // Constants
     const FUNDING_PERCENTAGE: u64 = 90; // Fund 90% of income amount
+    const FIXED_YIELD_PERCENTAGE: u64 = 10; // Investors get 10% fixed yield
+    // Fixed-point scale for cumulative per-token accounting (reduces truncation)
+    const CUMULATIVE_SCALE: u128 = 1000000000u128; // 1e9
     
     // Time constants
     const SECONDS_PER_DAY: u64 = 86400;
@@ -121,6 +124,7 @@ module rwfi_addr::spv {
         total_apt_invested: u64, // Total APT invested by all investors
         total_collections: u64, // Total APT collected from income payments
         available_for_funding: u64, // APT available to fund new incomes
+        total_funded_amount: u64, // Total APT deployed to suppliers (working capital)
         admin: address,
         total_funded_incomes: u64, // Count of funded incomes
         treasury_cap: account::SignerCapability, // Capability to sign for the treasury account
@@ -240,6 +244,7 @@ module rwfi_addr::spv {
             total_apt_invested: 0,
             total_collections: 0,
             available_for_funding: 0,
+            total_funded_amount: 0,
             admin: admin_address,
             total_funded_incomes: 0,
             treasury_cap,
@@ -391,13 +396,12 @@ module rwfi_addr::spv {
         if (table::contains(&registry.investors, investor_addr)) {
             let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
             investor_data.total_invested = investor_data.total_invested + amount;
-            // Don't update investment_timestamp for existing investors - keep original timestamp
         } else {
             table::upsert(&mut registry.investors, investor_addr, Investor {
                 total_invested: amount,
                 total_withdrawn: 0,
                 inv_tokens: 0,
-                investment_timestamp: investment_time, // When they invested
+                investment_timestamp: investment_time,
             });
             registry.total_investors = registry.total_investors + 1;
         };
@@ -486,7 +490,9 @@ module rwfi_addr::spv {
         
         // Get income details
         let income = get_income(supplier_addr, income_id);
-        let funding_amount = (income.amount * FUNDING_PERCENTAGE) / 100;
+        // Use u128 intermediates to avoid multiplication overflow on large octa-denominated values
+        let funding_amount_u128: u128 = (income.amount as u128) * (FUNDING_PERCENTAGE as u128) / 100u128;
+        let funding_amount: u64 = funding_amount_u128 as u64;
         
         // Check if we have enough funds
         let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
@@ -498,6 +504,7 @@ module rwfi_addr::spv {
         
         // Update pool
         pool.available_for_funding = pool.available_for_funding - funding_amount;
+        pool.total_funded_amount = pool.total_funded_amount + funding_amount;
         pool.total_funded_incomes = pool.total_funded_incomes + 1;
         
         // Record funded income
@@ -532,47 +539,48 @@ module rwfi_addr::spv {
         let funded_registry = borrow_global_mut<FundedIncomeRegistry>(@rwfi_addr);
         assert!(table::contains(&funded_registry.funded_incomes, funded_income_id), E_INCOME_NOT_FOUND);
         
-        let funded_income = table::borrow_mut(&mut funded_registry.funded_incomes, funded_income_id);
-        assert!(!funded_income.collected, E_INCOME_ALREADY_FUNDED);
-        
-        let supplier_addr = funded_income.supplier_addr;
-        
-        // Update funded income record
-        funded_income.collected = true;
-        funded_income.collected_at = timestamp::now_seconds();
-        funded_income.collected_amount = collected_amount;
-        
-        // Update investment pool with collections
-        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        pool.total_collections = pool.total_collections + collected_amount;
-        
-        // Create new epoch when collections happen - now with funding timestamp
-        create_new_epoch_internal(collected_amount, funded_income.funded_at, funded_income_id);
-        
-        // Mark as collected in income registry
-        mark_income_collected(funded_income.supplier_addr, funded_income.income_id);
+    let funded_income = table::borrow_mut(&mut funded_registry.funded_incomes, funded_income_id);
+    assert!(!funded_income.collected, E_INCOME_ALREADY_FUNDED);
+    let supplier_addr = funded_income.supplier_addr;
+    // Save principal and funded_at before mutating
+    let principal = funded_income.funded_amount;
+    let funded_at = funded_income.funded_at;
+    // Update funded income record
+    funded_income.collected = true;
+    funded_income.collected_at = timestamp::now_seconds();
+    funded_income.collected_amount = collected_amount;
+    // Update investment pool with collections
+    let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
+    pool.total_collections = pool.total_collections + collected_amount;
+    // Create new epoch when collections happen - now with funding timestamp and principal
+    create_new_epoch_internal(collected_amount, principal, funded_at, funded_income_id);
+    // Mark as collected in income registry
+    mark_income_collected(funded_income.supplier_addr, funded_income.income_id);
     }
 
     // Internal function to create new epoch when collections happen - now tracks funding time
-    fun create_new_epoch_internal(collected_amount: u64, funded_timestamp: u64, funded_income_id: u64) acquires EpochRegistry {
+    fun create_new_epoch_internal(collected_amount: u64, principal: u64, funded_timestamp: u64, funded_income_id: u64) acquires EpochRegistry {
         let epoch_registry = borrow_global_mut<EpochRegistry>(@rwfi_addr);
-        
+    // Calculate fixed yield (10% of principal) using u128 to avoid overflow
+    let yield_amount_u128: u128 = (principal as u128) * (FIXED_YIELD_PERCENTAGE as u128) / 100u128;
+    // Only principal + yield is distributed to investors
+    let distributable_u128: u128 = (principal as u128) + yield_amount_u128;
+    // If collected_amount < distributable, distribute only what was collected (edge case: short payment)
+    let actual_distributable_u128: u128 = if ((collected_amount as u128) < distributable_u128) { collected_amount as u128 } else { distributable_u128 };
+    let actual_distributable: u64 = actual_distributable_u128 as u64;
         // Get current total INV supply at this moment
         let total_inv_supply = invoice_coin::get_total_supply();
-        
-        // Create new epoch
+        // Create new epoch with distributable amount only
         epoch_registry.current_epoch = epoch_registry.current_epoch + 1;
         epoch_registry.total_epochs = epoch_registry.total_epochs + 1;
-        
         let new_epoch = CollectionEpoch {
             epoch_id: epoch_registry.current_epoch,
-            collections_amount: collected_amount,
+            collections_amount: actual_distributable,
             total_inv_supply_at_epoch: total_inv_supply,
             timestamp: timestamp::now_seconds(), // When collection happened
             funded_timestamp, // When the invoice was originally funded
             funded_income_id, // Reference to the funded income
         };
-        
         table::upsert(&mut epoch_registry.epochs, epoch_registry.current_epoch, new_epoch);
     }
 
@@ -761,11 +769,11 @@ module rwfi_addr::spv {
 
     // -------------------------------------------------
 
-    // Timestamp-based withdrawal system - only returns from invoices funded AFTER investment
+    // Timestamp-based withdrawal system - C-FLEXIBLE-V2 with proportional token burning
     public entry fun withdraw_returns_timestamp_based(
         investor: &signer,
         inv_tokens_to_redeem: u64
-    ) acquires InvestmentPool, InvestorRegistry, EpochRegistry {
+    ) acquires InvestmentPool, InvestorRegistry {
         let investor_addr = signer::address_of(investor);
         
         let registry = borrow_global_mut<InvestorRegistry>(@rwfi_addr);
@@ -774,56 +782,91 @@ module rwfi_addr::spv {
         let investor_data = table::borrow_mut(&mut registry.investors, investor_addr);
         assert!(investor_data.inv_tokens >= inv_tokens_to_redeem, E_INVALID_WITHDRAWAL_AMOUNT);
         
-        // Get investor's investment timestamp
-        let investment_timestamp = investor_data.investment_timestamp;
-        let current_epoch = {
-            let epoch_registry = borrow_global<EpochRegistry>(@rwfi_addr);
-            epoch_registry.current_epoch
-        };
+        let total_inv_supply = invoice_coin::get_total_supply();
+        assert!(total_inv_supply > 0, E_INVALID_WITHDRAWAL_AMOUNT);
         
-        // Calculate returns only from invoices funded AFTER investment
-        let withdrawal_amount = calculate_timestamp_based_returns(
-            inv_tokens_to_redeem,
-            investment_timestamp
-        );
+        let pool = borrow_global_mut<InvestmentPool>(@rwfi_addr);
         
-        // If no returns available, return original APT (0% returns case)
-        let final_withdrawal_amount = if (withdrawal_amount == 0) {
-            // Calculate proportional share of original investment to return
-            let total_inv_supply = invoice_coin::get_total_supply();
-            let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+        // === Calculate pro-rata shares (use u128 to prevent overflow) ===
+        
+        // Principal share = investor's portion of total invested capital
+        let principal_numerator: u128 = (inv_tokens_to_redeem as u128) * (pool.total_apt_invested as u128);
+        let principal_share: u64 = (principal_numerator / (total_inv_supply as u128)) as u64;
+        
+        // Funded share = investor's portion of deployed capital (working capital)
+        let funded_numerator: u128 = (inv_tokens_to_redeem as u128) * (pool.total_funded_amount as u128);
+        let funded_share: u64 = (funded_numerator / (total_inv_supply as u128)) as u64;
+        
+        // Collection share = investor's portion of collections received
+        let collection_numerator: u128 = (inv_tokens_to_redeem as u128) * (pool.total_collections as u128);
+        let collection_share: u64 = (collection_numerator / (total_inv_supply as u128)) as u64;
+        
+        // === C-FLEXIBLE-V2 LOGIC: Proportional withdrawal and burning ===
+        
+        // Unfunded portion (always available - the 10% kept in treasury)
+        let unfunded_share: u64 = principal_share - funded_share;
+        
+        // Check if funded portion is available (collections cover funded amount)
+        let funded_portion_available: bool = collection_share >= funded_share;
+        
+        let final_withdrawal_amount: u64;
+        let tokens_to_burn: u64;
+        let principal_consumed: u64;
+        let funded_consumed: u64;
+        let collection_consumed: u64;
+        
+        if (funded_portion_available) {
+            // === CASE 1: Full withdrawal available ===
+            // Investor can withdraw: principal + profit
+            let profit: u64 = collection_share - funded_share;
+            final_withdrawal_amount = principal_share + profit;
             
-            // Return proportional share of total invested (not collections)
-            (inv_tokens_to_redeem * pool.total_apt_invested) / total_inv_supply
+            // Burn ALL requested tokens (full withdrawal)
+            tokens_to_burn = inv_tokens_to_redeem;
+            
+            // Accounting: consume full shares
+            principal_consumed = principal_share;
+            funded_consumed = funded_share;
+            collection_consumed = collection_share;
+            
         } else {
-            withdrawal_amount
+            // === CASE 2: Partial withdrawal (only unfunded portion available) ===
+            // Investor can only withdraw: unfunded portion
+            final_withdrawal_amount = unfunded_share;
+            
+            // Burn tokens PROPORTIONAL to withdrawal amount
+            // If withdrawing 10 APT out of 100 APT principal, burn 10% of tokens
+            let tokens_numerator: u128 = (inv_tokens_to_redeem as u128) * (unfunded_share as u128);
+            tokens_to_burn = (tokens_numerator / (principal_share as u128)) as u64;
+            
+            // Accounting: only consume unfunded portion from principal
+            // Don't touch funded_amount or collections (still locked)
+            principal_consumed = unfunded_share;
+            funded_consumed = 0;
+            collection_consumed = 0;
         };
         
         assert!(final_withdrawal_amount > 0, E_INVALID_WITHDRAWAL_AMOUNT);
+        assert!(tokens_to_burn > 0, E_INVALID_WITHDRAWAL_AMOUNT);
         
-        // Burn INV tokens
-        invoice_coin::burn_from_primary_store(@rwfi_addr, investor_addr, inv_tokens_to_redeem);
+        // === Execute withdrawal ===
+        
+        // Burn the calculated tokens (all or proportional)
+        invoice_coin::burn_from_primary_store(@rwfi_addr, investor_addr, tokens_to_burn);
         
         // Transfer APT to investor from treasury account
-        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
         let treasury_signer = account::create_signer_with_capability(&pool.treasury_cap);
         aptos_account::transfer(&treasury_signer, investor_addr, final_withdrawal_amount);
         
-        // Update pool accounting
-        let pool_mut = borrow_global_mut<InvestmentPool>(@rwfi_addr);
-        if (final_withdrawal_amount <= pool_mut.total_collections) {
-            // Withdrawing from returns
-            pool_mut.total_collections = pool_mut.total_collections - final_withdrawal_amount;
-        } else {
-            // Returning original investment (0% returns case)
-            let excess = final_withdrawal_amount - pool_mut.total_collections;
-            pool_mut.total_collections = 0;
-            pool_mut.total_apt_invested = pool_mut.total_apt_invested - excess;
-            pool_mut.available_for_funding = pool_mut.available_for_funding - excess;
-        };
+        // === Update pool accounting ===
         
-        // Update investor data
-        investor_data.inv_tokens = investor_data.inv_tokens - inv_tokens_to_redeem;
+        pool.total_apt_invested = pool.total_apt_invested - principal_consumed;
+        pool.total_funded_amount = pool.total_funded_amount - funded_consumed;
+        pool.total_collections = pool.total_collections - collection_consumed;
+        
+        // === Update investor data ===
+        
+        investor_data.inv_tokens = investor_data.inv_tokens - tokens_to_burn;
         investor_data.total_withdrawn = investor_data.total_withdrawn + final_withdrawal_amount;
     }
 
@@ -847,7 +890,13 @@ module rwfi_addr::spv {
                     epoch.total_inv_supply_at_epoch > 0) {
                     
                     // Calculate proportional share of this epoch's collections
-                    let investor_share = (inv_tokens_to_redeem * epoch.collections_amount) / epoch.total_inv_supply_at_epoch;
+                    // Cap the investor tokens used for this epoch to the total INV supply at the epoch
+                    // This prevents a redeeming party from claiming more than the epoch's collections when
+                    // their current token balance exceeds the historical supply snapshot.
+                    let tokens_for_epoch: u64 = if (inv_tokens_to_redeem > epoch.total_inv_supply_at_epoch) { epoch.total_inv_supply_at_epoch } else { inv_tokens_to_redeem };
+                    let numerator: u128 = (tokens_for_epoch as u128) * (epoch.collections_amount as u128);
+                    let share_u128: u128 = numerator / (epoch.total_inv_supply_at_epoch as u128);
+                    let investor_share: u64 = share_u128 as u64;
                     total_returns = total_returns + investor_share;
                 };
             };
@@ -915,6 +964,20 @@ module rwfi_addr::spv {
     }
 
     #[view]
+    public fun get_pool_stats_2(): (u64, u64, u64, u64, u64, bool) acquires InvestmentPool {
+        let pool = borrow_global<InvestmentPool>(@rwfi_addr);
+        let full_withdrawal_enabled = pool.total_collections >= pool.total_funded_amount;
+        (
+            pool.total_apt_invested,
+            pool.total_funded_amount,
+            pool.total_collections,
+            pool.available_for_funding,
+            pool.total_funded_incomes,
+            full_withdrawal_enabled
+        )
+    }
+
+    #[view]
     public fun get_investor_info(investor_addr: address): (bool, u64, u64, u64, u64) acquires InvestorRegistry {
         let registry = borrow_global<InvestorRegistry>(@rwfi_addr);
         if (table::contains(&registry.investors, investor_addr)) {
@@ -940,16 +1003,32 @@ module rwfi_addr::spv {
         };
         
         let pool = borrow_global<InvestmentPool>(@rwfi_addr);
-        if (pool.total_collections == 0) {
-            return 0
-        };
-        
         let total_inv_supply = invoice_coin::get_total_supply();
         if (total_inv_supply == 0) {
             return 0
         };
         
-        (inv_tokens * pool.total_collections) / total_inv_supply
+        // Calculate pro-rata shares
+        let principal_numerator: u128 = (inv_tokens as u128) * (pool.total_apt_invested as u128);
+        let principal_share: u64 = (principal_numerator / (total_inv_supply as u128)) as u64;
+        
+        let funded_numerator: u128 = (inv_tokens as u128) * (pool.total_funded_amount as u128);
+        let funded_share: u64 = (funded_numerator / (total_inv_supply as u128)) as u64;
+        
+        let collection_numerator: u128 = (inv_tokens as u128) * (pool.total_collections as u128);
+        let collection_share: u64 = (collection_numerator / (total_inv_supply as u128)) as u64;
+        
+        let unfunded_share = principal_share - funded_share;
+        let funded_portion_available = collection_share >= funded_share;
+        
+        if (funded_portion_available) {
+            // Full withdrawal: principal + profit
+            let profit = collection_share - funded_share;
+            principal_share + profit
+        } else {
+            // Partial withdrawal: unfunded portion only
+            unfunded_share
+        }
     }
 
     // KYC View Functions TODO
@@ -1098,7 +1177,9 @@ module rwfi_addr::spv {
             let pool = borrow_global<InvestmentPool>(@rwfi_addr);
             let total_inv_supply = invoice_coin::get_total_supply();
             if (total_inv_supply > 0) {
-                (inv_tokens * pool.total_apt_invested) / total_inv_supply
+                let numerator: u128 = (inv_tokens as u128) * (pool.total_apt_invested as u128);
+                let share_u128: u128 = numerator / (total_inv_supply as u128);
+                share_u128 as u64
             } else {
                 0
             }

@@ -8,6 +8,7 @@ export { CleanSupplierDashboard } from "./CleanSupplierDashboard";
 export { ContractDashboard } from "./ContractDashboard";
 export { InvoiceManagement } from "./InvoiceManagement";
 export { PoolStats } from "./PoolStats";
+export { WithdrawalGateStatus } from "./WithdrawalGateStatus";
 
 // UI components
 export { AppHeader } from "./AppHeader";

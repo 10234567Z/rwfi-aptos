@@ -50,28 +50,12 @@ export function CleanKYCUpload({ onKYCSubmitted }: CleanKYCUploadProps) {
       return;
     }
 
-    if (kycStatus === false) {
-      toast({
-        title: "KYC Already Submitted",
-        description: "Your KYC application is already under review",
-        variant: "destructive",
-      });
-      return;
-    }
+    console.log("Current KYC Status:", kycStatus);  
 
     if (kycStatus === true) {
       toast({
         title: "KYC Already Approved",
         description: "Your KYC has already been approved",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (kycStatus === null) {
-      toast({
-        title: "KYC Status not Submitted",
-        description: "Please check your KYC status before submitting",
         variant: "destructive",
       });
       return;

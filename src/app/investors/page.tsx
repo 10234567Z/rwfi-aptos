@@ -1,5 +1,6 @@
 "use client";
 
+import { WithdrawalGateStatus } from "@/components";
 import { ContractDashboard } from "@/components/ContractDashboard";
 
 export default function InvestorsPage() {
@@ -14,8 +15,10 @@ export default function InvestorsPage() {
             Browse and invest in verified real-world asset opportunities with transparent returns.
           </p>
         </div>
-        
-        <ContractDashboard />
+        <div className="space-y-6">
+          <WithdrawalGateStatus />
+          <ContractDashboard />
+        </div>
       </div>
     </div>
   );

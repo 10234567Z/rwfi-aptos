@@ -87,6 +87,8 @@ export function useKYC() {
         },
       });
 
+      console.log("Raw KYC status result:", statusResult);
+
       if(statusResult){
         if(statusResult[0] === true){
           setKycStatus(true);

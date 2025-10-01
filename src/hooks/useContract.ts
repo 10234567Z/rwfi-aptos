@@ -50,10 +50,11 @@ async function submitTransactionWithWallet(
 export function usePoolStats() {
   const [poolStats, setPoolStats] = useState<{
     totalInvested: string;
+    totalFundedAmount: string;
     totalCollections: string;
     availableForFunding: string;
     totalFundedIncomes: string;
-    reserved: string;
+    fullWithdrawalEnabled: boolean;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,18 +66,19 @@ export function usePoolStats() {
       
       const result = await aptos.view({
         payload: {
-          function: CONTRACT_FUNCTIONS.GET_POOL_STATS,
+          function: CONTRACT_FUNCTIONS.GET_POOL_STATS_2,
           functionArguments: [],
         },
       }); // no address needed
 
-      if (result && Array.isArray(result) && result.length >= 5) {
+      if (result && Array.isArray(result) && result.length >= 6) {
         setPoolStats({
           totalInvested: result[0]?.toString() || "0",
-          totalCollections: result[1]?.toString() || "0",
-          availableForFunding: result[2]?.toString() || "0",
-          totalFundedIncomes: result[3]?.toString() || "0",
-          reserved: result[4]?.toString() || "0",
+          totalFundedAmount: result[1]?.toString() || "0",
+          totalCollections: result[2]?.toString() || "0",
+          availableForFunding: result[3]?.toString() || "0",
+          totalFundedIncomes: result[4]?.toString() || "0",
+          fullWithdrawalEnabled: Boolean(result[5]) || false,
         });
       }
     } catch (err) {
@@ -100,6 +102,7 @@ export function useInvestorInfo() {
   const [investorInfo, setInvestorInfo] = useState<any>(null);
   const [availableReturns, setAvailableReturns] = useState<string | null>(null);
   const [aptBalance, setAptBalance] = useState<string | null>(null);
+  const [invTokens, setInvTokens] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [totalWithdrawn, setTotalWithdrawn] = useState<string | null>(null);
@@ -128,29 +131,30 @@ export function useInvestorInfo() {
           },
         });
         setInvestorInfo(investor_info[1]);
-        const val1 = investor_info[1] != null ? Number(investor_info[1]) : 0;
-        const val3 = investor_info[3] != null ? Number(investor_info[3]) : 0;
-        setTotalWithdrawn((val1 - val3).toString());
+        setTotalWithdrawn(investor_info[2]!.toString());
+        setInvTokens(investor_info[3]!.toString());
+
+        // Calculate withdrawal amount using all tokens
+        if (investor_info[3]) {
+          try {
+            const withdrawalCalc = await aptos.view({
+              payload: {
+                function: CONTRACT_FUNCTIONS.CALCULATE_WITHDRAWAL_AMOUNT,
+                functionArguments: [account.address.toString(), investor_info[3]!.toString()],
+              },
+            });
+            if (withdrawalCalc && withdrawalCalc[0] !== undefined) {
+              setAvailableReturns(withdrawalCalc[0]!.toString());
+            } else {
+              setAvailableReturns("0");
+            }
+          } catch (calcError) {
+            console.log("Failed to calculate withdrawal amount:", calcError);
+            setAvailableReturns("0");
+          }
+        }
       } catch (error) {
         console.log("Failed to get investor info:", error);
-      }
-
-      try {
-        const withdrawableResult = await aptos.view({
-          payload: {
-            function: CONTRACT_FUNCTIONS.CALCULATE_AVAILABLE_RETURNS,
-            functionArguments: [account.address.toString(), ],
-          },
-        });
-
-        if (withdrawableResult && withdrawableResult[0] !== undefined) {
-          setAvailableReturns(withdrawableResult[0]!.toString());
-        } else {
-          setAvailableReturns("0"); 
-        }
-      } catch (calcError) {
-        console.log("Failed to calculate withdrawable amount, setting to 0:", calcError);
-        setAvailableReturns("0");
       }
     } catch (err) {
       console.error("Error fetching investor info:", err);
@@ -166,7 +170,7 @@ export function useInvestorInfo() {
     }
   }, [account?.address]);
 
-  return { investorInfo, availableReturns, aptBalance, loading, error, totalWithdrawn, refetch: fetchInvestorInfo };
+  return { investorInfo, availableReturns, invTokens, aptBalance, loading, error, totalWithdrawn, refetch: fetchInvestorInfo };
 }
 
 // Hook for investment transactions

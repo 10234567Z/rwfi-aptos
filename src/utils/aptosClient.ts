@@ -73,10 +73,12 @@ export const CONTRACT_FUNCTIONS = {
   
   // View functions
   GET_POOL_STATS: `${CONTRACT_ADDRESS}::spv::get_pool_stats`,
+  GET_POOL_STATS_2: `${CONTRACT_ADDRESS}::spv::get_pool_stats_2`,
   GET_INVESTOR_INFO: `${CONTRACT_ADDRESS}::spv::get_investor_info`,
   GET_INVESTOR_EPOCH_INFO: `${CONTRACT_ADDRESS}::spv::get_investor_epoch_info`,
   GET_CURRENT_EPOCH: `${CONTRACT_ADDRESS}::spv::get_current_epoch`,
   CALCULATE_AVAILABLE_RETURNS: `${CONTRACT_ADDRESS}::spv::calculate_available_returns_for_investor`,
+  CALCULATE_WITHDRAWAL_AMOUNT: `${CONTRACT_ADDRESS}::spv::calculate_withdrawal_amount`,
   CALCULATE_WITHDRAWAL_AMOUNT_TIMESTAMP_BASED: `${CONTRACT_ADDRESS}::spv::calculate_withdrawal_amount_timestamp_based`, // New function
   CALCULATE_TOTAL_WITHDRAWABLE: `${CONTRACT_ADDRESS}::spv::calculate_withdrawal_amount_timestamp_based`, // Alias for compatibility
   
