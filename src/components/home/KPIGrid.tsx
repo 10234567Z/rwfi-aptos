@@ -29,13 +29,13 @@ export function KPIGrid() {
         </CardHeader>
         <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="p-4 rounded-md bg-slate-50 dark:bg-slate-900">
-            <div className="text-sm text-slate-500">Total Invested</div>
-            <div className="text-2xl font-semibold mt-2 text-slate-900 dark:text-white">{loading ? "..." : formatAPT(poolStats?.totalInvested)}</div>
+            <div className="text-sm text-slate-500">Total Current Holding</div>
+            <div className="text-2xl font-semibold mt-2 text-slate-900 dark:text-white">{loading ? "..." : formatAPT(poolStats?.totalInvested)} APT</div>
           </div>
 
           <div className="p-4 rounded-md bg-slate-50 dark:bg-slate-900">
             <div className="text-sm text-slate-500">Available for Funding</div>
-            <div className="text-2xl font-semibold mt-2 text-slate-900 dark:text-white">{loading ? "..." : formatAPT(poolStats?.availableForFunding)}</div>
+            <div className="text-2xl font-semibold mt-2 text-slate-900 dark:text-white">{loading ? "..." : formatAPT(poolStats?.availableForFunding)} APT</div>
           </div>
 
           <div className="p-4 rounded-md bg-slate-50 dark:bg-slate-900">
@@ -45,7 +45,7 @@ export function KPIGrid() {
 
           <div className="p-4 rounded-md bg-slate-50 dark:bg-slate-900">
             <div className="text-sm text-slate-500">Total Collections (from buyer)</div>
-            <div className="text-2xl font-semibold mt-2 text-slate-900 dark:text-white">{loading ? "..." : formatAPT(poolStats?.totalCollections)}</div>
+            <div className="text-2xl font-semibold mt-2 text-slate-900 dark:text-white">{loading ? "..." : formatAPT(poolStats?.totalCollections)} APT</div>
           </div>
         </CardContent>
       </div>

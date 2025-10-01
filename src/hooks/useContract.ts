@@ -549,7 +549,7 @@ export function useAdminFunding() {
       setLoading(true);
       setError(null);
 
-  const tx = createTransactionWithGas(CONTRACT_FUNCTIONS.FUND_ACCRUED_INCOME, [normalizeAddress(supplierAddress), incomeId.toString()], { maxGasAmount: 400000, gasUnitPrice: 100 }, 120);
+      const tx = createTransactionWithGas(CONTRACT_FUNCTIONS.FUND_ACCRUED_INCOME, [normalizeAddress(supplierAddress), incomeId.toString()], { maxGasAmount: 400000, gasUnitPrice: 100 }, 120);
       const response = await submitTransactionWithWallet(signAndSubmitTransaction, tx, { timeoutSecs: 120, checkSuccess: true });
       return response;
     } catch (err) {
@@ -563,4 +563,156 @@ export function useAdminFunding() {
   };
 
   return { fundAccruedIncome, loading, error };
+}
+
+// Admin: Process KYC Application
+export function useAdminKYC() {
+  const { account, signAndSubmitTransaction } = useWallet();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const processKYCApplication = async (supplierAddress: string, approved: boolean) => {
+    if (!account) throw new Error("Wallet not connected");
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const tx = createTransactionWithGas(
+        CONTRACT_FUNCTIONS.PROCESS_KYC_APPLICATION,
+        [normalizeAddress(supplierAddress), approved],
+        { maxGasAmount: 300000, gasUnitPrice: 100 },
+        120
+      );
+      const response = await submitTransactionWithWallet(signAndSubmitTransaction, tx, { timeoutSecs: 120, checkSuccess: true });
+      return response;
+    } catch (err) {
+      console.error("Error processing KYC:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getPendingKYCSuppliers = async () => {
+    try {
+      const result = await aptos.view({
+        payload: {
+          function: CONTRACT_FUNCTIONS.GET_ALL_PENDING_KYC_SUPPLIERS,
+          functionArguments: [],
+        },
+      });
+
+      if (result && Array.isArray(result) && result[0]) {
+        return (result[0] as string[]).map((addr) => normalizeAddress(addr));
+      }
+      return [];
+    } catch (err) {
+      console.error("Error fetching pending KYC suppliers:", err);
+      return [];
+    }
+  };
+
+  const getSupplierKYCDetails = async (supplierAddress: string) => {
+    try {
+      const result = await aptos.view({
+        payload: {
+          function: CONTRACT_FUNCTIONS.GET_SUPPLIER_KYC_DETAILS,
+          functionArguments: [normalizeAddress(supplierAddress)],
+        },
+      });
+
+      if (result && Array.isArray(result) && result.length >= 2) {
+        const exists = result[0] as boolean;
+        if (exists) {
+          const details = result[1] as any;
+          return {
+            status: Number(details.status?.toString() || "0"),
+            level: Number(details.level?.toString() || "0"),
+            submittedAt: Number(details.submitted_at?.toString() || "0"),
+            processedAt: Number(details.processed_at?.toString() || "0"),
+            documentHashes: details.document_hashes || [],
+          };
+        }
+      }
+      return null;
+    } catch (err) {
+      console.error("Error fetching KYC details:", err);
+      return null;
+    }
+  };
+
+  return { processKYCApplication, getPendingKYCSuppliers, getSupplierKYCDetails, loading, error };
+}
+
+// Admin: Record Income Collection
+export function useAdminCollection() {
+  const { account, signAndSubmitTransaction } = useWallet();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const recordIncomeCollection = async (fundedIncomeId: string, collectedAmount: string) => {
+    if (!account) throw new Error("Wallet not connected");
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const tx = createTransactionWithGas(
+        CONTRACT_FUNCTIONS.RECORD_INCOME_COLLECTION,
+        [fundedIncomeId.toString(), collectedAmount.toString()],
+        { maxGasAmount: 400000, gasUnitPrice: 100 },
+        120
+      );
+      const response = await submitTransactionWithWallet(signAndSubmitTransaction, tx, { timeoutSecs: 120, checkSuccess: true });
+      return response;
+    } catch (err) {
+      console.error("Error recording income collection:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { recordIncomeCollection, loading, error };
+}
+
+// Admin: Get Treasury Address
+export function useTreasuryAddress() {
+  const [treasuryAddress, setTreasuryAddress] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchTreasuryAddress = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const result = await aptos.view({
+        payload: {
+          function: CONTRACT_FUNCTIONS.GET_TREASURY_ADDRESS,
+          functionArguments: [],
+        },
+      });
+
+      if (result && result[0]) {
+        setTreasuryAddress(normalizeAddress(result[0].toString()));
+      }
+    } catch (err) {
+      console.error("Error fetching treasury address:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch treasury address");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTreasuryAddress();
+  }, []);
+
+  return { treasuryAddress, loading, error, refetch: fetchTreasuryAddress };
 }

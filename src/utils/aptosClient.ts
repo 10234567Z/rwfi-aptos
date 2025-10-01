@@ -110,6 +110,7 @@ export const CONTRACT_FUNCTIONS = {
   FUND_ACCRUED_INCOME_WITH_RISK_CHECK: `${CONTRACT_ADDRESS}::spv::fund_accrued_income_with_risk_check`,
   RECORD_INCOME_COLLECTION: `${CONTRACT_ADDRESS}::spv::record_income_collection`,
   CHECK_AND_MARK_DEFAULTS: `${CONTRACT_ADDRESS}::spv::check_and_mark_defaults`,
+  GET_TREASURY_ADDRESS: `${CONTRACT_ADDRESS}::spv::get_treasury_address`,
 } as const;
 
 // Utility helpers
