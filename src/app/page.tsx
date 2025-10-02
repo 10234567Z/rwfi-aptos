@@ -50,6 +50,7 @@ export default function HomePage() {
             <div className="inline-flex rounded-md shadow-sm" role="tablist" aria-label="View selector">
               <Button
                 size="sm"
+                variant="outline"
                 className={view === 'supplier' ? 'bg-gradient-to-r from-blue-600 to-blue-900 text-white border-0 px-8 py-4 m-2' : 'bg-gray-100 border-gray-300 text-gray-900 px-8 py-4 m-2'}
                 onClick={() => setView('supplier')}
               >
