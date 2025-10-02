@@ -13,7 +13,6 @@ export const metadata: Metadata = {
   title: "Invera - Real-World Asset Financing",
   description: "Decentralized accrued income financing platform on Aptos blockchain",
   applicationName: "Invera",
-  manifest: "/manifest.json",
 };
 
 export default function RootLayout({
