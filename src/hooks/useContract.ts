@@ -63,7 +63,7 @@ export function usePoolStats() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const result = await aptos.view({
         payload: {
           function: CONTRACT_FUNCTIONS.GET_POOL_STATS_2,
@@ -113,7 +113,7 @@ export function useInvestorInfo() {
     try {
       setLoading(true);
       setError(null);
-      
+
       // Get APT balance
       try {
         const balance = await aptos.getAccountAPTAmount({ accountAddress: account.address.toString() });
@@ -188,9 +188,9 @@ export function useInvestment() {
       setLoading(true);
       setError(null);
 
-  const transaction = createTransactionWithGas(CONTRACT_FUNCTIONS.INVEST_APT, [amount.toString()]);
-  const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
-  return response;
+      const transaction = createTransactionWithGas(CONTRACT_FUNCTIONS.INVEST_APT, [amount.toString()]);
+      const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
+      return response;
     } catch (err) {
       console.error("Error investing APT:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to invest APT";
@@ -226,7 +226,7 @@ export function useWithdrawal() {
       }
 
       const amountU64 = Math.floor(amount).toString();
-      const functionName = useTimestampBased 
+      const functionName = useTimestampBased
         ? CONTRACT_FUNCTIONS.WITHDRAW_RETURNS_TIMESTAMP_BASED
         : CONTRACT_FUNCTIONS.WITHDRAW_RETURNS;
 
@@ -246,8 +246,8 @@ export function useWithdrawal() {
         },
       };
 
-  const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
-  return response;
+      const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
+      return response;
     } catch (err) {
       console.error("Error withdrawing returns:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to withdraw returns";
@@ -271,7 +271,7 @@ export function useCurrentEpoch() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const result = await aptos.view({
         payload: {
           function: CONTRACT_FUNCTIONS.GET_CURRENT_EPOCH,
@@ -333,8 +333,8 @@ export function useRiskAssessment() {
         },
       };
 
-  const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
-  return response;
+      const response = await submitTransactionWithWallet(signAndSubmitTransaction, transaction);
+      return response;
     } catch (err) {
       console.error("Error submitting risk assessment:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to submit risk assessment";
@@ -423,13 +423,13 @@ export function useInvoiceCreation() {
     } catch (err) {
       console.error("Error creating invoice:", err);
       console.error("Full error object:", JSON.stringify(err, null, 2));
-      
+
       // Enhanced error handling based on common Aptos errors
       let errorMessage = "Failed to create invoice";
-      
+
       if (err instanceof Error) {
         const errorStr = err.message.toLowerCase();
-        
+
         if (errorStr.includes("simulation failed")) {
           errorMessage = "Transaction simulation failed. Please check your input values and try again.";
         } else if (errorStr.includes("insufficient funds") || errorStr.includes("insufficient balance")) {
@@ -446,7 +446,7 @@ export function useInvoiceCreation() {
           errorMessage = err.message;
         }
       }
-      
+
       setError(errorMessage);
       throw new Error(errorMessage);
     } finally {

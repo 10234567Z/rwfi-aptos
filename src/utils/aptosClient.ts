@@ -1,7 +1,7 @@
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
 
 export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
-export const APTOS_NETWORK = Network.DEVNET;
+export const APTOS_NETWORK = Network.TESTNET;
 
 // Debug log to check if CONTRACT_ADDRESS is properly loaded
 if (typeof window !== 'undefined') {

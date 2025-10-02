@@ -1,6 +1,5 @@
 "use client";
 
-import { WithdrawalGateStatus } from "@/components";
 import { ContractDashboard } from "@/components/ContractDashboard";
 
 export default function InvestorsPage() {
