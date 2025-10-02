@@ -114,45 +114,6 @@ graph LR
     E --> F[Withdraw Principal + 10%]
 ```
 
-## 🔧 Development
-
-### Prerequisites
-- Node.js 18+
-- Aptos CLI
-- Git
-
-### Setup
-```bash
-# Clone repository
-git clone https://github.com/your-org/invera-aptos
-cd invera-aptos
-
-# Install dependencies
-npm install
-
-# Set up environment
-cp .env.example .env.local
-# Configure CONTRACT_ADDRESS and other variables
-
-# Start development
-npm run dev
-```
-
-### Move Commands
-```bash
-# Compile contracts
-npm run move:compile
-
-# Run tests
-npm run move:test
-
-# Publish contracts
-npm run move:publish
-
-# Upgrade contracts
-npm run move:upgrade
-```
-
 ## 🗂️ Project Structure
 
 ```
@@ -215,22 +176,6 @@ npm run move:upgrade
 - **Value** represents claim on pool assets and future returns
 
 ## 🌐 Deployment
-
-### Testnet Deployment
-```bash
-# Configure testnet profile
-aptos init --profile testnet --network testnet
-
-# Deploy contracts
-npm run move:publish -- --profile testnet
-
-# Update environment
-# Set NEXT_PUBLIC_CONTRACT_ADDRESS=<deployed_address>
-
-# Deploy frontend
-npm run build
-npm run deploy
-```
 
 ### Mainnet Considerations
 - Multi-signature admin setup
